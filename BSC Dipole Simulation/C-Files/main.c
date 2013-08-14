@@ -484,12 +484,15 @@ int main(int argcount, char** argvektor) {
 	 * This way several different simulations with different starting parameters are possible. */
 	char infile[1024];
 	getcwd(infile, sizeof(infile));
+
+	// append "/" since getcwd doesn't include that, but it is needed for good user input
+	strncat(infile, "/", 1);
 	unsigned int length = sizeof(infile) - strlen(infile);
 
 	if(argcount == 2) {
 		strncat(infile, argvektor[1], length);
 	} else {
-		strncat(infile,"/Config_Files/config.txt", length);		// default
+		strncat(infile,"Config_Files/config.txt", length);		// default
 	}
 
 	// get current working directory and pass arguments to file reader
