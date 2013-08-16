@@ -217,7 +217,7 @@ static void *iteration (int *no) {
 				xj = position[2*j]	 + sign_l[N*i+j]*L + sign_m[N*i+j]*box_x;
 				yj = position[2*j+1] + sign_m[N*i+j]*L;
 
-				// Use a modulo for double values, this is ((xi-xj)+L) % cutoff
+				// Get the distance between both particles
 				dx = xi - xj;
 				dy = yi - yj;
 
@@ -265,14 +265,13 @@ static void *iteration (int *no) {
 				verlet_max[2*(*no)+1] = temp;
 			}
 
-			// Calculate x and y positions with periodic boundary conditions
-			temp = (position[2*i] + L)/L;
-			position[2*i] = (temp-(int)(temp))*L;
+			// Calculate x and y positions with periodic boundary conditions, save what row the particle travelled from
+			position[2*i] 	-= floor(position[2*i]/L)*L;
 
 			temp = (position[2*i+1] + L)/L;
-			position[2*i+1] = (temp-(int)(temp))*L;
+			position[2*i+1] -= floor(position[2*i+1]/L)*L;
 
-			// check whether the particle moved from one box to another, function: ((int)((x+L)/L)-1 gives the signum of the box traveled from (0 if still in the same box)
+			// check whether the particle moved from one box to another, function: ((int)((y+L)/L)-1 gives the signum of the row traveled from (0 if still in the same row)
 			position[2*i] -= (((int)(temp))-1)*box_x;
 
 		}
