@@ -69,15 +69,16 @@ int write_file(char *file, double *position, int timestep, int no_writeouts, int
  * Writeouts                            : 10
  *
  * */
-int read_file(char* file, char* outfile, int* N, double* kT, double* Gamma, double* shear, \
-		double* tau_B, double* D_Brown, double* timestep, int* max_timesteps, int* thread_number, \
-		int* no_writeouts) {
+struct parameters *read_file(char* file) {
 	// open configuration file, check whether operation was successful
 	FILE *infile = fopen(file, "r");
 	if(infile == NULL) {
 		fprintf(stderr, "The file \"%s\" could not be found or opened.\n", file);
-		return EXIT_FAILURE;
+		return NULL;
 	}
+
+	// define a new struct which we will return
+	struct parameters *param = malloc(sizeof(struct parameters));
 
 	// variable for checking whether everything went well
 	int check;
@@ -85,32 +86,32 @@ int read_file(char* file, char* outfile, int* N, double* kT, double* Gamma, doub
 	// read input from document, adjust output location and return
 	char temp[1024];
 
-	if ((check = fscanf(infile, "Number of particles (N)              : %d\n",  N)) < 1)
-		return EXIT_FAILURE;
-	if ((check = fscanf(infile, "Energie (k_B*T)				      : %lf\n", kT)) < 1)
-		return EXIT_FAILURE;
-	if ((check = fscanf(infile, "Dipole interaction relation (Gamma)  : %lf\n", Gamma)) < 1)
-		return EXIT_FAILURE;
-	if ((check = fscanf(infile, "Shear rate (shear)                   : %lf\n", shear)) < 1)
-		return EXIT_FAILURE;
-	if ((check = fscanf(infile, "Brownian Diffusion Time	          : %lf\n", tau_B)) < 1)
-		return EXIT_FAILURE;
-	if ((check = fscanf(infile, "Brownian Diffusion		              : %lf\n", D_Brown)) < 1)
-		return EXIT_FAILURE;
-	if ((check = fscanf(infile, "Time difference (delta_t)            : %lf\n", timestep)) < 1)
-		return EXIT_FAILURE;
+	if ((check = fscanf(infile, "Number of particles (N)              : %d\n",  (&(param->N)))) < 1)
+		return NULL;
+	if ((check = fscanf(infile, "Energie (k_B*T)				      : %lf\n", (&(param->kT)))) < 1)
+		return NULL;
+	if ((check = fscanf(infile, "Dipole interaction relation (Gamma)  : %lf\n", (&(param->Gamma)))) < 1)
+		return NULL;
+	if ((check = fscanf(infile, "Shear rate (shear)                   : %lf\n", (&(param->shear)))) < 1)
+		return NULL;
+	if ((check = fscanf(infile, "Brownian Diffusion Time	          : %lf\n", (&(param->tau_B)))) < 1)
+		return NULL;
+	if ((check = fscanf(infile, "Brownian Diffusion		              : %lf\n", (&(param->D_Brown)))) < 1)
+		return NULL;
+	if ((check = fscanf(infile, "Time difference (delta_t)            : %lf\n", (&(param->timestep)))) < 1)
+		return NULL;
 	if ((check = fscanf(infile, "Destination file (outfile)           : %s\n",  temp)) < 1)
-		return EXIT_FAILURE;
-	if ((check = fscanf(infile, "Iterations                           : %d\n",  max_timesteps)) < 1)
-		return EXIT_FAILURE;
-	if ((check = fscanf(infile, "Number of Threads                    : %d\n",  thread_number)) < 1)
-		return EXIT_FAILURE;
-	if ((check = fscanf(infile, "Writeouts                            : %d",    no_writeouts)) < 1)
-		return EXIT_FAILURE;
+		return NULL;
+	if ((check = fscanf(infile, "Iterations                           : %d\n",  (&(param->max_timesteps)))) < 1)
+		return NULL;
+	if ((check = fscanf(infile, "Number of Threads                    : %d\n",  (&(param->thread_number)))) < 1)
+		return NULL;
+	if ((check = fscanf(infile, "Writeouts                            : %d",    (&(param->no_writeouts)))) < 1)
+		return NULL;
 
 	// Concatenate current working directory with filename from config file
-	strncat(outfile, temp, 1024-strlen(outfile));
+	strncat((param->outfile), temp, 1024-strlen((param->outfile)));
 	fclose(infile);
 
-	return EXIT_SUCCESS;
+	return param;
 }

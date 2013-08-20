@@ -15,7 +15,7 @@ struct parameters {
 
 	// system properties
 	int 	N;
-	double	kt;
+	double	kT;
 	double 	Gamma;
 	double 	shear;
 	double	tau_B;

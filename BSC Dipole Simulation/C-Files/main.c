@@ -69,6 +69,7 @@
 #include "simulation.h"
 #include "fileIO_v1.h"
 #include "extendedmath.h"
+#include "structs.h"
 
 
 /*-------------------------------------------------------------------------------------------------------*/
@@ -117,6 +118,38 @@ static pthread_t* threads;
 static pthread_barrier_t barrier_main_one;
 static pthread_barrier_t barrier_main_two;
 static pthread_barrier_t barrier_internal;
+
+/*-------------------------------------------------------------------------------------------------------*/
+int read_struct (char* infile) {
+
+	// get all parameters from file
+	struct parameters *param = read_file(infile);
+
+	// check whether the struct was read right, else return failure notice
+	if (param == NULL)
+		return EXIT_FAILURE;
+
+	// get all the necessary variables from the struct
+	strncat(outfile, param->outfile, 1024-strlen(outfile));
+
+	N 		= param->N;
+	kT		= param->kT;
+	Gamma	= param->Gamma;
+	shear	= param->shear;
+	tau_B	= param->tau_B;
+	D_Brown = param->D_Brown;
+
+	timestep	  	= param->timestep;
+	max_timesteps  	= param->max_timesteps;
+	thread_number  	= param->thread_number;
+	no_writeouts	= param->no_writeouts;
+
+	// free the memory space needed
+	free(param);
+
+	// return to caller
+	return EXIT_SUCCESS;
+}
 
 /*-------------------------------------------------------------------------------------------------------*/
 int init(void) {
@@ -310,7 +343,10 @@ void simulation (void) {
 
 	// Initiate timestep-counter, write initial composition to file, compute borders for threads and set write-out interval
 	timesteps = 0;
-	write_file(outfile, position, timesteps, no_writeouts, N);
+
+	if (write_file(outfile, position, timesteps, no_writeouts, N) == EXIT_FAILURE)
+		exit(EXIT_FAILURE);
+
 	timesteps ++;
 	no_writeouts = max_timesteps / no_writeouts;
 
@@ -515,8 +551,7 @@ int main(int argcount, char** argvektor) {
 
 	// get current working directory and pass arguments to file reader
 	getcwd(outfile, sizeof(outfile));
-	int success_check = read_file(infile, outfile, &N, &kT, &Gamma, &shear, &tau_B, &D_Brown, \
-				&timestep, &max_timesteps, &thread_number, &no_writeouts);
+	int success_check = read_struct(infile);
 
 	// check whether file could be properly read
 	if(success_check != EXIT_SUCCESS) {

@@ -8,8 +8,7 @@
 #ifndef FILEIO_H_
 #define FILEIO_H_
 
-extern int 	write_file 	(char *, double *, int, int, int);
-extern int 	read_file	(char*, char*, int*, double*, double*, double*, \
-						 double*, double*, double*, int*, int*,	int*);
+extern int 					write_file 	(char *, double *, int, int, int);
+extern struct parameters*	read_file	(char*);
 
 #endif /* FILEIO_H_ */
