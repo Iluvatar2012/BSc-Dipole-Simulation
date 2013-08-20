@@ -1,5 +1,4 @@
-/*
- * main.c
+/* main.c
  *		This program simulates the interaction of induced dipoles in an external magnetic field,
  *		confined to a 2-dimensional plane. All important features of the simulation can be changed
  *		via the config-files, giving the user full control of the system.
@@ -69,6 +68,7 @@
 // Own header files
 #include "simulation.h"
 #include "fileIO_v1.h"
+#include "extendedmath.h"
 
 
 /*-------------------------------------------------------------------------------------------------------*/
@@ -92,6 +92,7 @@ static double* position;
 // System properties
 static int 	  N;
 static double L;
+static double Li;
 static double shear;
 static double D_Brown;
 static double D_kT;
@@ -99,14 +100,13 @@ static double tau_B;
 static double weigh_brown;
 
 // Variables required for Verlet list creation
-static int* verlet;
+static int 	   N_Verlet;
+static int*    verlet;
 static double* verlet_max;
 static double* verlet_distance;
-static double verlet_max_1;
-static double verlet_max_2;
-static double d_cutoff_verlet;
-static short* sign_m;
-static short* sign_l;
+static double  verlet_max_1;
+static double  verlet_max_2;
+static double  d_cutoff_verlet;
 
 // Other miscellaneous system variables, especially for thread handling
 static char outfile[1024];
@@ -120,33 +120,45 @@ static pthread_barrier_t barrier_internal;
 
 /*-------------------------------------------------------------------------------------------------------*/
 int init(void) {
-	// Initiate random number generator (0,1), use system time as seed and allocate sizes of fundamental arrays
+	// Initiate random number generator (0,1), use system time as seed
     time_t t;
     time(&t);
     srand((unsigned int)t);
 
+	// compute Boxlength from a = sqrt(L²/(PI*N)) = 1, or, more inaccurately, narrow a as side of a box
+	// so that: a = sqrt(L²/N) = 1
+//	L = sqrt(PI*N);
+	L 	= sqrt(N);
+	Li 	= 1.0/L;
+
+	// set values of remaining static variables
+	delta_t				= tau_B * timestep;
+	weigh_brown 		= sqrt(2.0 * D_Brown * delta_t);
+	D_kT 				= D_Brown/kT;
+	box_x 				= 0;
+	cutoff 				= (L/2.0);
+	cutoff_squared 		= cutoff*cutoff;
+	d_cutoff_verlet 	= 0.16 * cutoff;	// equals 2.9/2.5-1, estimate for best runtime
+
+	// compute the size of the Verlet list, add 20% as safety margin
+	N_Verlet = N*PI*cutoff_squared/(L*L);
+	N_Verlet *= 1.2;
+
+	// allocate memory for fundamentally important arrays
 	position = 			malloc(2*N*sizeof(double));
 	force = 			malloc(2*N*sizeof(double));
-	verlet = 			malloc(N*N*sizeof(int));
+	verlet = 			malloc(N*N_Verlet*sizeof(int));
 	verlet_distance = 	malloc(2*N*sizeof(double));
-	sign_m = 			malloc(N*N*sizeof(short));
-	sign_l = 			malloc(N*N*sizeof(short));
 	threads = 			malloc(thread_number*sizeof(pthread_t));
 	borders = 			malloc((thread_number+1)*sizeof(int));
 	numbers = 			malloc(thread_number*sizeof(int));
 	verlet_max = 		malloc(2*thread_number*sizeof(double));
 
 	if((position == NULL) || (force == NULL) || (verlet == NULL) || (verlet_distance == NULL) || \
-			(sign_m == NULL) || (sign_l==NULL) || (threads == NULL) || (borders == NULL) || \
-			(numbers == NULL) || (verlet_max == NULL)) {
+			(threads == NULL) || (borders == NULL) || (numbers == NULL) || (verlet_max == NULL)) {
 		fprintf(stderr, "Memory space for fundamentally important arrays could not be allocated.\n");
 		return EXIT_FAILURE;
 	}
-
-	// compute Boxlength from a = sqrt(L²/(PI*N)) = 1, or, more inaccurately, narrow a as side of a box
-	// so that: a = sqrt(L²/N) = 1
-//	L = sqrt(PI*N);
-	L = sqrt(N);
 
 	// compute initial particle positions, the particles shall be placed upon an evenly spaced grid
 //	double init_x = 0;
@@ -167,15 +179,6 @@ int init(void) {
 		position[i+1]	= (rand()/(double)RAND_MAX)*L;
 	}
 
-	// set values of remaining static variables
-	delta_t				= tau_B * timestep;
-	weigh_brown 		= sqrt(2.0 * D_Brown * delta_t);
-	D_kT 				= D_Brown/kT;
-	box_x 				= 0;
-	cutoff 				= (L/2.0);
-	cutoff_squared 		= cutoff*cutoff;
-	d_cutoff_verlet 	= 0.16 * cutoff;	// equals 2.9/2.5-1, estimate for best runtime
-
 	// initiate Verlet list
 	update_verlet();
 	return EXIT_SUCCESS;
@@ -186,7 +189,7 @@ int init(void) {
 static void *iteration (int *no) {
 	// Define necessary variables
 	double xi, xj, yi, yj;
-	double dx, dy;
+	double dx, dy, sig_y;
 	double r_squared;
 
 	double temp_force;
@@ -203,6 +206,7 @@ static void *iteration (int *no) {
 	while(1) {
 		// iterate 2D-forces over all particles in Verlet-List
 		for (int i=min; i<max; i++) {
+			// get the position of the current particle
 			xi = position[2*i];
 			yi = position[2*i+1];
 
@@ -210,16 +214,27 @@ static void *iteration (int *no) {
 			force[2*i]	 = 0;
 			force[2*i+1] = 0;
 
-			iterate = verlet[N*(i+1)-1];
+			// get the amount of particles we have to iterate
+			iterate = verlet[N_Verlet*(i+1)-1];
 
-			for (int k=0; k<iterate; k+=1) {	// iterate to number given in last entry of i in Verlet-List
-				j  = verlet[N*i+k];
-				xj = position[2*j]	 + sign_l[N*i+j]*L + sign_m[N*i+j]*box_x;
-				yj = position[2*j+1] + sign_m[N*i+j]*L;
+			// iterate to number given in last entry of i in Verlet-List
+			for (int k=0; k<iterate; k+=1) {
+				// get the next particle and it's position within the root box
+				j  = verlet[N_Verlet*i+k];
+				xj = position[2*j];
+				yj = position[2*j+1];
 
 				// Get the distance between both particles
 				dx = xi - xj;
 				dy = yi - yj;
+
+				// alter dx, this accounts for Lees-Edwards conditions
+				sig_y 	= dround(dy*Li);
+				dx 		+= sig_y * box_x;
+
+				// find images through altering dx and dy
+				dx -= dround(dx*Li)*L;
+				dy -= sig_y * L;
 
 				// get square of distance and compute force in x and y direction
 				r_squared = dx*dx + dy*dy;
@@ -367,8 +382,6 @@ void simulation (void) {
 	free(force);
 	free(verlet);
 	free(verlet_distance);
-	free(sign_m);
-	free(sign_l);
 	free(threads);
 	free(borders);
 	free(numbers);
@@ -381,87 +394,93 @@ void simulation (void) {
 void update_verlet (void) {
 	// define necessary variables: i, j and temporary position variables,
 	double xi, yi, xj, yj;
+	double dx, dy, sig_y;
 	double r_squared;
 
-	double temp_x, temp_y;
-	int temp_m = 0, temp_l = 0;
+	// count how many values there are in the list
 	int k;
-
 
 	// iterate over all particles, read positions
 	for (int i=0; i<N; i++) {
 		xi = position[2*i];
 		yi = position[2*i+1];
 
-		// save the amount of neighbors to particle i
+		// save the amount of neighbors to particle i in k
 		k = 0;
+
 		for (int j=0; j<i; j++) {
+			// get the position of particle j
 			xj = position[2*j];
 			yj = position[2*j+1];
-			r_squared = L*L;
 
-			/* iterate over all neighbors, including periodic pictures and consider box movement in x-direction,
-			 * save smallest squared distance*/
-			for (int l=-2; l<=2; l++) {
-				for (int m=-1; m<=1; m++) {
-					temp_x = (xi-(xj+l*L+m*box_x));
-					temp_y = (yi-(yj+m*L));
+			// get the distance between both particles
+			dx = xi - xj;
+			dy = yi - yj;
 
-					if((temp_x*temp_x + temp_y*temp_y) < r_squared) {
-						r_squared = temp_x*temp_x + temp_y*temp_y;
+			// alter dx, this accounts for Lees-Edwards conditions
+			sig_y 	= dround(dy*Li);
+			dx 		+= sig_y * box_x;
 
-						// store m and l in sign array
-						temp_m = m;
-						temp_l = l;
-					}
-				}
-			}
+			// find images through altering dx and dy
+			dx -= dround(dx*Li)*L;
+			dy -= sig_y * L;
+
+			// find out squared distance and check against the verlet cutoff
+			r_squared = dx*dx + dy*dy;
 
 			// squaring is a strict monotonous function, thus we can check with the squares of the values (saves N*N sqrt()-calls)
 			if(cutoff_squared >= r_squared) {
+				// check whether theere is enough space in the verlet list
+				if (k == N_Verlet -1) {
+					fprintf(stderr, "Verlet list is too short!!\n");
+					fprintf(stderr, "N: %d, N_Verlet: %d, k: %d\n", N, N_Verlet, k);
+					exit(EXIT_FAILURE);
+				}
+
 				// add neighbor and signums into verlet and sign list
-				verlet[N*i+k] 	= j;
-				sign_m[N*i+j]	= temp_m;
-				sign_l[N*i+j]	= temp_l;
+				verlet[N_Verlet*i+k] 	= j;
 				k++;
 			}
 		}
 
 		// ignore entry i=j
 		for (int j=(i+1); j<N; j++) {
+			// get the position of paritcle j
 			xj = position[2*j];
 			yj = position[2*j+1];
-			r_squared = L*L;
 
-			/* iterate over all neighbors, including periodic pictures and consider box movement in x-direction,
-			 * save smallest squared distance*/
-			for (int l=-2; l<=2; l++) {
-				for (int m=-1; m<=1; m++) {
-					temp_x = (xi-(xj + l*L + m*box_x));
-					temp_y = (yi-(yj + m*L));
+			// get the distance between both particles
+			dx = xi - xj;
+			dy = yi - yj;
 
-					if((temp_x*temp_x + temp_y*temp_y) < r_squared) {
-						r_squared = temp_x*temp_x + temp_y*temp_y;
+			// alter dx, this accounts for Lees-Edwards conditions
+			sig_y 	= dround(dy*Li);
+			dx 		+= sig_y * box_x;
 
-						// store m and l in sign array
-						temp_m = m;
-						temp_l = l;
-					}
-				}
-			}
+			// find images through altering dx and dy
+			dx -= dround(dx*Li)*L;
+			dy -= sig_y * L;
+
+			// find out squared distance and check against the verlet cutoff
+			r_squared = dx*dx + dy*dy;
 
 			// squaring is a strict monotonous function, thus we can check with the squares of the values (saves N*N sqrt()-calls)
 			if(cutoff_squared >= r_squared) {
+				// check whether theere is enough space in the verlet list
+				if (k == N_Verlet -1) {
+					fprintf(stderr, "Verlet list is too short!!\n");
+					fprintf(stderr, "N: %d, N_Verlet: %d, k: %d\n", N, N_Verlet, k);
+					exit(EXIT_FAILURE);
+				}
+
 				// add neighbor and signums into verlet and sign list
-				verlet[N*i+k] 	= j;
-				sign_m[N*i+j]	= temp_m;
-				sign_l[N*i+j]	= temp_l;
+				verlet[N_Verlet*i+k] 	= j;
 				k++;
 			}
 		}
 
 		// edit last entry of row, here we store how many neighbors particle i has, and reset distance counting vector
-		verlet[N*(i+1)-1] 		= k;
+		verlet[N_Verlet*(i+1)-1] 		= k;
 		verlet_distance[2*i]	= 0;
 		verlet_distance[2*i+1] 	= 0;
 	}
