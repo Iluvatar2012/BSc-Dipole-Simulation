@@ -92,7 +92,9 @@ struct parameters *read_file(char* file) {
 		return NULL;
 	if ((check = fscanf(infile, "Dipole interaction relation (Gamma)  : %lf\n", (&(param->Gamma)))) < 1)
 		return NULL;
-	if ((check = fscanf(infile, "Shear rate (shear)                   : %lf\n", (&(param->shear)))) < 1)
+	if ((check = fscanf(infile, "Shear rate A (shear_A)               : %lf\n", (&(param->shear_A)))) < 1)
+		return NULL;
+	if ((check = fscanf(infile, "Shear rate B (shear_B)               : %lf\n", (&(param->shear_B)))) < 1)
 		return NULL;
 	if ((check = fscanf(infile, "Brownian Diffusion Time	          : %lf\n", (&(param->tau_B)))) < 1)
 		return NULL;

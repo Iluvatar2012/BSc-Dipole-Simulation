@@ -78,7 +78,8 @@ static double cutoff;
 static double cutoff_squared;
 static double delta_t;
 static double timestep;
-static double box_x;
+static double box_x_A;
+static double box_x_B;
 static int	  max_timesteps;
 static int 	  no_writeouts;
 
@@ -94,7 +95,8 @@ static double* position;
 static int 	  N;
 static double L;
 static double Li;
-static double shear;
+static double shear_A;
+static double shear_B;
 static double D_Brown;
 static double D_kT;
 static double tau_B;
@@ -135,7 +137,8 @@ int read_struct (char* infile) {
 	N 		= param->N;
 	kT		= param->kT;
 	Gamma	= param->Gamma;
-	shear	= param->shear;
+	shear_A	= param->shear_A;
+	shear_B	= param->shear_B;
 	tau_B	= param->tau_B;
 	D_Brown = param->D_Brown;
 
@@ -168,7 +171,8 @@ int init(void) {
 	delta_t				= tau_B * timestep;
 	weigh_brown 		= sqrt(2.0 * D_Brown * delta_t);
 	D_kT 				= D_Brown/kT;
-	box_x 				= 0;
+	box_x_A				= 0;
+	box_x_B				= 0;
 	cutoff 				= (L/2.0);
 	cutoff_squared 		= cutoff*cutoff;
 	d_cutoff_verlet 	= 0.16 * cutoff;	// equals 2.9/2.5-1, estimate for best runtime
@@ -236,9 +240,23 @@ static void *iteration (int *no) {
 	int iterate;
 	int j;
 
+	// define two new variables, which will ensure that even numbered particles are of type A and uneven of type B
+	double* box_one;
+	double* box_two;
+
+	if (min%2 == 0){
+		box_one = &box_x_A;
+		box_two = &box_x_B;
+	}
+	else {
+		box_one = &box_x_B;
+		box_two = &box_x_A;
+	}
+
+	// let the simulation run until the thread is terminate... a little ugly here
 	while(1) {
-		// iterate 2D-forces over all particles in Verlet-List
-		for (int i=min; i<max; i++) {
+		// iterate 2D-forces over all particles A in Verlet-List
+		for (int i=min; i<max; i+=2) {
 			// get the position of the current particle
 			xi = position[2*i];
 			yi = position[2*i+1];
@@ -263,7 +281,48 @@ static void *iteration (int *no) {
 
 				// alter dx, this accounts for Lees-Edwards conditions
 				sig_y 	= dround(dy*Li);
-				dx 		+= sig_y * box_x;
+				dx 		+= sig_y * (*box_one);
+
+				// find images through altering dx and dy
+				dx -= dround(dx*Li)*L;
+				dy -= sig_y * L;
+
+				// get square of distance and compute force in x and y direction
+				r_squared = dx*dx + dy*dy;
+				temp_force = 3*Gamma/(r_squared*r_squared*sqrt(r_squared)); // WARNING: this is F/r
+
+				force[2*i] 		+= temp_force*dx; // equals F*x/r = F*cos(phi) (x-component)
+				force[2*i+1]	+= temp_force*dy; // equals F*y/r = F*sin(phi) (y-component)
+			}
+		}
+
+		// iterate 2D-forces over all particles B in Verlet-List
+		for (int i=min+1; i<max; i+=2) {
+			// get the position of the current particle
+			xi = position[2*i];
+			yi = position[2*i+1];
+
+			// initiate forces for this round
+			force[2*i]	 = 0;
+			force[2*i+1] = 0;
+
+			// get the amount of particles we have to iterate
+			iterate = verlet[N_Verlet*(i+1)-1];
+
+			// iterate to number given in last entry of i in Verlet-List
+			for (int k=0; k<iterate; k+=1) {
+				// get the next particle and it's position within the root box
+				j  = verlet[N_Verlet*i+k];
+				xj = position[2*j];
+				yj = position[2*j+1];
+
+				// Get the distance between both particles
+				dx = xi - xj;
+				dy = yi - yj;
+
+				// alter dx, this accounts for Lees-Edwards conditions
+				sig_y 	= dround(dy*Li);
+				dx 		+= sig_y * (*box_two);
 
 				// find images through altering dx and dy
 				dx -= dround(dx*Li)*L;
@@ -281,7 +340,8 @@ static void *iteration (int *no) {
 		// wait for all threads to finish iteration of forces, then continue with writing position data
 		pthread_barrier_wait(&barrier_internal);
 
-		for (int i=min; i<max; i++) {
+		// compute new positions for particles A from forces, remember periodic boundary conditions
+		for (int i=min; i<max; i+=2) {
 
 			xi = position[2*i];
 			yi = position[2*i+1];
@@ -299,7 +359,7 @@ static void *iteration (int *no) {
 			g2 = temp*sin(TWO_PI*u2);
 
 			// Calculate next positions and speeds for all particles
-			position[2*i] 	+= D_kT*delta_t*(force[2*i]+(position[2*i+1]/L*shear)) + weigh_brown * g1;
+			position[2*i] 	+= D_kT*delta_t*(force[2*i]+(position[2*i+1]/L*shear_A)) + weigh_brown * g1;
 			position[2*i+1] += D_kT*delta_t*force[2*i+1] + weigh_brown * g2;
 
 			// update list of total displacement for each particle after last verlet-list update
@@ -320,8 +380,50 @@ static void *iteration (int *no) {
 			position[2*i+1] -= floor(position[2*i+1]/L)*L;
 
 			// check whether the particle moved from one box to another, function: ((int)((y+L)/L)-1 gives the signum of the row traveled from (0 if still in the same row)
-			position[2*i] -= (((int)(temp))-1)*box_x;
+			position[2*i] -= (((int)(temp))-1)*(*box_one);
+		}
 
+		// compute new positions for particles B from forces, remember periodic boundary conditions
+		for (int i=min+1; i<max; i+=2) {
+
+			xi = position[2*i];
+			yi = position[2*i+1];
+
+			// use Box-Muller-method in order to obtain two independent standard normal values
+			do {
+				u1 = rand()/(double)RAND_MAX;
+			} while (u1 == 0.0);
+			do {
+				u2 = rand()/(double)RAND_MAX;
+			} while (u2 == 0.0);
+
+			temp = sqrt(-2*log(u1));
+			g1 = temp*cos(TWO_PI*u2);
+			g2 = temp*sin(TWO_PI*u2);
+
+			// Calculate next positions and speeds for all particles
+			position[2*i] 	+= D_kT*delta_t*(force[2*i]+(position[2*i+1]/L*shear_B)) + weigh_brown * g1;
+			position[2*i+1] += D_kT*delta_t*force[2*i+1] + weigh_brown * g2;
+
+			// update list of total displacement for each particle after last verlet-list update
+			verlet_distance[2*i] 	+= (xi - position[2*i]);
+			verlet_distance[2*i+1] 	+= (yi - position[2*i+1]);
+
+			if ((temp = sqrt(verlet_distance[2*i]*verlet_distance[2*i] + verlet_distance[2*i+1]*verlet_distance[2*i+1])) > verlet_max[2*(*no)]) {
+				verlet_max[2*(*no)+1] = verlet_max[2*(*no)];
+				verlet_max[2*(*no)] = temp;
+			} else if (temp > verlet_max[2*(*no)+1]) {
+				verlet_max[2*(*no)+1] = temp;
+			}
+
+			// Calculate x and y positions with periodic boundary conditions, save what row the particle traveled from
+			position[2*i] 	-= floor(position[2*i]/L)*L;
+
+			temp = (position[2*i+1] + L)/L;
+			position[2*i+1] -= floor(position[2*i+1]/L)*L;
+
+			// check whether the particle moved from one box to another, function: ((int)((y+L)/L)-1 gives the signum of the row traveled from (0 if still in the same row)
+			position[2*i] -= (((int)(temp))-1)*(*box_two);
 		}
 		// Signal to main thread, that all threads have finished their iteration
 		pthread_barrier_wait(&barrier_main_one);
@@ -387,10 +489,15 @@ void simulation (void) {
 			}
 		}
 
-		// adjust orientation of upper and lower box row, check if Verlet list has to be updated
-		box_x += shear*L*delta_t;
-		box_x  = ((box_x/L)-(int)(box_x/L))*L;
+		// adjust orientation of upper and lower box row
+		box_x_A += shear_A*L*delta_t;
+		box_x_B += shear_B*L*delta_t;
+		box_x_A  -= floor(box_x_A/L)*L;
+		box_x_B  -= floor(box_x_B/L)*L;
 
+//		fprintf(stderr, "box A: %lf, box B: %lf\n", box_x_A, box_x_B);
+
+		// check if verlet list has to be updated
 		if ((verlet_max_1+verlet_max_2) > d_cutoff_verlet) {
 			update_verlet();
 			verlet_max_1 = 0;
@@ -432,6 +539,7 @@ void update_verlet (void) {
 	double xi, yi, xj, yj;
 	double dx, dy, sig_y;
 	double r_squared;
+	double box_x;
 
 	// count how many values there are in the list
 	int k;
@@ -448,6 +556,12 @@ void update_verlet (void) {
 			// get the position of particle j
 			xj = position[2*j];
 			yj = position[2*j+1];
+
+			// check whether the particle is of type A or B
+			if (j%2 == 0)
+				box_x = box_x_A;
+			else
+				box_x = box_x_B;
 
 			// get the distance between both particles
 			dx = xi - xj;
@@ -466,7 +580,7 @@ void update_verlet (void) {
 
 			// squaring is a strict monotonous function, thus we can check with the squares of the values (saves N*N sqrt()-calls)
 			if(cutoff_squared >= r_squared) {
-				// check whether theere is enough space in the verlet list
+				// check whether there is enough space in the verlet list
 				if (k == N_Verlet -1) {
 					fprintf(stderr, "Verlet list is too short!!\n");
 					fprintf(stderr, "N: %d, N_Verlet: %d, k: %d\n", N, N_Verlet, k);
@@ -481,9 +595,15 @@ void update_verlet (void) {
 
 		// ignore entry i=j
 		for (int j=(i+1); j<N; j++) {
-			// get the position of paritcle j
+			// get the position of particle j
 			xj = position[2*j];
 			yj = position[2*j+1];
+
+			// check whether the particle is of type A or B
+			if (j%2 == 0)
+				box_x = box_x_A;
+			else
+				box_x = box_x_B;
 
 			// get the distance between both particles
 			dx = xi - xj;
