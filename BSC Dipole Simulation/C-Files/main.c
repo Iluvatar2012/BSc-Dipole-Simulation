@@ -502,7 +502,7 @@ void update_verlet (void) {
 
 			// squaring is a strict monotonous function, thus we can check with the squares of the values (saves N*N sqrt()-calls)
 			if(cutoff_squared >= r_squared) {
-				// check whether theere is enough space in the verlet list
+				// check whether there is enough space in the verlet list
 				if (k == N_Verlet -1) {
 					fprintf(stderr, "Verlet list is too short!!\n");
 					fprintf(stderr, "N: %d, N_Verlet: %d, k: %d\n", N, N_Verlet, k);

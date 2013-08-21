@@ -8,6 +8,7 @@
 #ifndef STRUCTS_H_
 #define STRUCTS_H_
 
+/*-------------------------------------------------------------------------------------------------------*/
 // define a struct for retrieving parameters from a given file
 struct parameters {
 	// file to be written to
@@ -27,5 +28,6 @@ struct parameters {
 	int		thread_number;
 	int		no_writeouts;
 };
+/*-------------------------------------------------------------------------------------------------------*/
 
 #endif /* STRUCTS_H_ */

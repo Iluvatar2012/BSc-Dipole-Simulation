@@ -109,9 +109,11 @@ struct parameters *read_file(char* file) {
 	if ((check = fscanf(infile, "Writeouts                            : %d",    (&(param->no_writeouts)))) < 1)
 		return NULL;
 
-	// Concatenate current working directory with filename from config file
+	// Concatenate current working directory with filename from config file, close the file stream
 	strncat((param->outfile), temp, 1024-strlen((param->outfile)));
 	fclose(infile);
 
+	// return to caller
 	return param;
 }
+/*-------------------------------------------------------------------------------------------------------*/

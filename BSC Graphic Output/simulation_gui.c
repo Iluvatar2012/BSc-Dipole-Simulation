@@ -35,7 +35,7 @@ int fileIO (char* file) {
 	}
 
 	// read N from file, exit if there is an error
-	size_t temp;
+	unsigned int temp;
 	temp = fread(&N, sizeof(int), 1, infile);
 
 	if(temp < 1) {
@@ -131,6 +131,8 @@ int graphicOutput () {
 	double picWidth		= ball->w;
 	double picHeight	= ball->h;
 
+	double posY;
+
 	// this will later hold our input from keyboard
 	Uint8	*keys;
 
@@ -203,9 +205,12 @@ int graphicOutput () {
 
 		// finally draw the current frame
 		for (int i=0; i<N; i++) {
+			// invert the y axis, otherwise (0,0) would be in the top left corner
+			posY = -positions[counter*2*N+2*i+1]+L;
+
 			// compute x and y position of each dot
 			dst.x = round((positions[counter*2*N+2*i]/L)  *scrWidth -picWidth/2.);
-			dst.y = round((positions[counter*2*N+2*i+1]/L)*scrHeight-picHeight/2.);
+			dst.y = round((posY/L)*scrHeight-picHeight/2.);
 
 			// copy image to screen
 			SDL_BlitSurface(ball, NULL, screen, &dst);
@@ -233,7 +238,7 @@ int main (int argcount, char** argvektor) {
 	char infile[1024];
 	getcwd(infile, sizeof(infile));
 	strncat(infile, "/", 1);
-	size_t length = sizeof(infile) - strlen(infile);
+	unsigned int length = sizeof(infile) - strlen(infile);
 
 	if(argcount == 2) {
 		strncat(infile, argvektor[1], length);
