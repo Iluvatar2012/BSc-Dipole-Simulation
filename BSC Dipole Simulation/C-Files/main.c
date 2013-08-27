@@ -71,7 +71,6 @@
 #include "extendedmath.h"
 #include "structs.h"
 
-
 /*-------------------------------------------------------------------------------------------------------*/
 // Basic values of Simulation
 static double cutoff;
@@ -85,7 +84,9 @@ static int 	  no_writeouts;
 
 // Particle properties
 static double kT;
-static double Gamma;
+static double Gamma_A;
+static double Gamma_B;
+static double m;
 
 // Arrays for mechanical movement
 static double* force;
@@ -97,10 +98,13 @@ static double L;
 static double Li;
 static double shear_A;
 static double shear_B;
-static double D_Brown;
-static double D_kT;
+static double D_Brown_A;
+static double D_Brown_B;
+static double D_kT_A;
+static double D_kT_B;
 static double tau_B;
-static double weigh_brown;
+static double weigh_brown_A;
+static double weigh_brown_B;
 
 // Variables required for Verlet list creation
 static int 	   N_Verlet;
@@ -110,6 +114,7 @@ static double* verlet_distance;
 static double  verlet_max_1;
 static double  verlet_max_2;
 static double  d_cutoff_verlet;
+static double  force_cutoff;
 
 // Other miscellaneous system variables, especially for thread handling
 static char outfile[1024];
@@ -134,13 +139,14 @@ int read_struct (char* infile) {
 	// get all the necessary variables from the struct
 	strncat(outfile, param->outfile, 1024-strlen(outfile));
 
-	N 		= param->N;
-	kT		= param->kT;
-	Gamma	= param->Gamma;
-	shear_A	= param->shear_A;
-	shear_B	= param->shear_B;
-	tau_B	= param->tau_B;
-	D_Brown = param->D_Brown;
+	N 			= param->N;
+	kT			= param->kT;
+	Gamma_A		= param->Gamma_A;
+	Gamma_B		= param->Gamma_B;
+	shear_A		= param->shear_A;
+	shear_B		= param->shear_B;
+	tau_B		= param->tau_B;
+	D_Brown_A 	= param->D_Brown_A;
 
 	timestep	  	= param->timestep;
 	max_timesteps  	= param->max_timesteps;
@@ -167,15 +173,28 @@ int init(void) {
 	L 	= sqrt(N);
 	Li 	= 1.0/L;
 
+	// compute diffusion value of particle B
+	m			= Gamma_B/Gamma_A;
+	D_Brown_B 	= D_Brown_A/m;
+
 	// set values of remaining static variables
 	delta_t				= tau_B * timestep;
-	weigh_brown 		= sqrt(2.0 * D_Brown * delta_t);
-	D_kT 				= D_Brown/kT;
+
+	weigh_brown_A 		= sqrt(2.0 * D_Brown_A * delta_t);
+	weigh_brown_B 		= sqrt(2.0 * D_Brown_B * delta_t);
+
+	D_kT_A 				= D_Brown_A/kT;
+	D_kT_B 				= D_Brown_B/kT;
+
 	box_x_A				= 0;
 	box_x_B				= 0;
+
 	cutoff 				= (L/2.0);
 	cutoff_squared 		= cutoff*cutoff;
 	d_cutoff_verlet 	= 0.16 * cutoff;	// equals 2.9/2.5-1, estimate for best runtime
+
+	// compute the force at cutoff value, this force will be deducted from the system
+	force_cutoff	= 3*Gamma_A/(cutoff_squared*cutoff_squared);
 
 	// compute the size of the Verlet list, add 20% as safety margin
 	N_Verlet = N*PI*cutoff_squared/(L*L);
@@ -240,17 +259,63 @@ static void *iteration (int *no) {
 	int iterate;
 	int j;
 
-	// define two new variables, which will ensure that even numbered particles are of type A and uneven of type B
+	// define new variables, which will ensure that even numbered particles are of type A and uneven of type B
 	double* box_one;
 	double* box_two;
 
+	double m_i_one;
+	double m_i_two;
+
+	double weigh_brown_one;
+	double weigh_brown_two;
+
+	double D_kT_one;
+	double D_kT_two;
+
+	double shear_one;
+	double shear_two;
+
+	double m_j;
+
 	if (min%2 == 0){
+		// assign the appropriate shear rate to even and uneven particles
 		box_one = &box_x_A;
 		box_two = &box_x_B;
+
+		// get the relation of all even values, this is basically the interaction relation this particle will have with other particles
+		m_i_one = 1.0;
+		m_i_two = m;
+
+		// set the appropriate diffusion parameters according to index of particle
+		weigh_brown_one = weigh_brown_A;
+		weigh_brown_two = weigh_brown_B;
+
+		D_kT_one = D_kT_A;
+		D_kT_two = D_kT_B;
+
+		// set shear value according to particle index
+		shear_one = shear_A;
+		shear_two = shear_B;
 	}
 	else {
+		// assign the appropriate shear rate to even and uneven particles
 		box_one = &box_x_B;
 		box_two = &box_x_A;
+
+		// get the relation of all even values, this is basically the interaction relation this particle will have with other particles
+		m_i_one = m;
+		m_i_two = 1.0;
+
+		// set the appropriate diffusion parameters according to index of particle
+		weigh_brown_one = weigh_brown_B;
+		weigh_brown_two = weigh_brown_A;
+
+		D_kT_one = D_kT_B;
+		D_kT_two = D_kT_A;
+
+		// set shear value according to particle index
+		shear_one = shear_B;
+		shear_two = shear_A;
 	}
 
 	// let the simulation run until the thread is terminate... a little ugly here
@@ -275,6 +340,9 @@ static void *iteration (int *no) {
 				xj = position[2*j];
 				yj = position[2*j+1];
 
+				// assign the appropriate interaction relation to the particle, depending whether it has even or uneven number
+				m_j = (j%2)*m + (j+1)%2;
+
 				// Get the distance between both particles
 				dx = xi - xj;
 				dy = yi - yj;
@@ -289,7 +357,7 @@ static void *iteration (int *no) {
 
 				// get square of distance and compute force in x and y direction
 				r_squared = dx*dx + dy*dy;
-				temp_force = 3*Gamma/(r_squared*r_squared*sqrt(r_squared)); // WARNING: this is F/r
+				temp_force = (m_i_one*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff); // WARNING: this is F/r
 
 				force[2*i] 		+= temp_force*dx; // equals F*x/r = F*cos(phi) (x-component)
 				force[2*i+1]	+= temp_force*dy; // equals F*y/r = F*sin(phi) (y-component)
@@ -316,6 +384,9 @@ static void *iteration (int *no) {
 				xj = position[2*j];
 				yj = position[2*j+1];
 
+				// assign the appropriate interaction relation to the particle, depending whether it has even or uneven number
+				m_j = (j%2)*m + (j+1)%2;
+
 				// Get the distance between both particles
 				dx = xi - xj;
 				dy = yi - yj;
@@ -330,7 +401,7 @@ static void *iteration (int *no) {
 
 				// get square of distance and compute force in x and y direction
 				r_squared = dx*dx + dy*dy;
-				temp_force = 3*Gamma/(r_squared*r_squared*sqrt(r_squared)); // WARNING: this is F/r
+				temp_force = (m_i_two*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff); // WARNING: this is F/r
 
 				force[2*i] 		+= temp_force*dx; // equals F*x/r = F*cos(phi) (x-component)
 				force[2*i+1]	+= temp_force*dy; // equals F*y/r = F*sin(phi) (y-component)
@@ -359,8 +430,8 @@ static void *iteration (int *no) {
 			g2 = temp*sin(TWO_PI*u2);
 
 			// Calculate next positions and speeds for all particles
-			position[2*i] 	+= D_kT*delta_t*(force[2*i]+(position[2*i+1]/L*shear_A)) + weigh_brown * g1;
-			position[2*i+1] += D_kT*delta_t*force[2*i+1] + weigh_brown * g2;
+			position[2*i] 	+= D_kT_one*delta_t*(force[2*i]+(position[2*i+1]/L*shear_one)) + weigh_brown_one * g1;
+			position[2*i+1] += D_kT_one*delta_t*force[2*i+1] + weigh_brown_one * g2;
 
 			// update list of total displacement for each particle after last verlet-list update
 			verlet_distance[2*i] 	+= (xi - position[2*i]);
@@ -402,8 +473,8 @@ static void *iteration (int *no) {
 			g2 = temp*sin(TWO_PI*u2);
 
 			// Calculate next positions and speeds for all particles
-			position[2*i] 	+= D_kT*delta_t*(force[2*i]+(position[2*i+1]/L*shear_B)) + weigh_brown * g1;
-			position[2*i+1] += D_kT*delta_t*force[2*i+1] + weigh_brown * g2;
+			position[2*i] 	+= D_kT_two*delta_t*(force[2*i]+(position[2*i+1]/L*shear_two)) + weigh_brown_two * g1;
+			position[2*i+1] += D_kT_two*delta_t*force[2*i+1] + weigh_brown_two * g2;
 
 			// update list of total displacement for each particle after last verlet-list update
 			verlet_distance[2*i] 	+= (xi - position[2*i]);
@@ -443,19 +514,25 @@ void simulation (void) {
 	int timesteps;
 	int ret_thread;
 
-	// Initiate timestep-counter, write initial composition to file, compute borders for threads and set write-out interval
+	// Initiate timestep-counter
 	timesteps = 0;
 
-	if (write_file(outfile, position, timesteps, no_writeouts, N) == EXIT_FAILURE)
+	// initialize file and write first time setup of the system
+	if (init_file(outfile, no_writeouts, N) == EXIT_FAILURE)
 		exit(EXIT_FAILURE);
 
+	write_file(position, timesteps, N);
+
+	// increase timestep counter and compute write-out interval
 	timesteps ++;
 	no_writeouts = max_timesteps / no_writeouts;
 
+	// compute borders of all threads
 	for(int i=0; i<(thread_number); i++) {
 		borders[i] = i*(int)(N/thread_number);
 		numbers[i] = i;
 	}
+
 	borders[thread_number] = N;
 
 	// Initiate Threads and barrier, catch problems, number of threads is given in config-file
@@ -495,8 +572,6 @@ void simulation (void) {
 		box_x_A  -= floor(box_x_A/L)*L;
 		box_x_B  -= floor(box_x_B/L)*L;
 
-//		fprintf(stderr, "box A: %lf, box B: %lf\n", box_x_A, box_x_B);
-
 		// check if verlet list has to be updated
 		if ((verlet_max_1+verlet_max_2) > d_cutoff_verlet) {
 			update_verlet();
@@ -506,7 +581,7 @@ void simulation (void) {
 
 		// check whether parameters should be written to declared external file
 		if ((timesteps%no_writeouts) == 0) {
-			write_file(outfile, position, timesteps, no_writeouts, N);
+			write_file(position, timesteps, N);
 		}
 
 		// increase timesteps and continue waiting threads

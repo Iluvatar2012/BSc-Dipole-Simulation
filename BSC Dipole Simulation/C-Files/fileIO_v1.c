@@ -25,8 +25,35 @@
 #include <stdlib.h>
 #include <string.h>
 
+// variables for initiating the read parameter
+static char* file;
+
+
 /*-------------------------------------------------------------------------------------------------------*/
-int write_file(char *file, double *position, int timestep, int no_writeouts, int N) {
+int init_file(char* infile, int no_writeouts, int N) {
+	file = infile;
+
+	// Open file, check whether operation was successful
+	FILE *outfile = fopen(file, "a+");
+	if (outfile == NULL) {
+		fprintf(stderr, "The file %s could not be opened on initialization.\n", file);
+		return EXIT_FAILURE;
+	}
+
+	// Upon first time setup, print N and amount of expected writeouts, no check is made, whether the data is actually written
+	no_writeouts ++;
+	fwrite(&N, sizeof(int), 1, outfile);
+	fwrite(&no_writeouts, sizeof(int), 1, outfile);
+
+	// Close outgoing stream
+	fclose(outfile);
+	fprintf(stderr, "Completed initializing outgoing file.\n");
+
+	return EXIT_SUCCESS;
+}
+
+/*-------------------------------------------------------------------------------------------------------*/
+int write_file(double *position, int timestep, int N) {
 
 	// Open file, check whether operation was successful
 	FILE *outfile = fopen(file, "a+");
@@ -35,14 +62,7 @@ int write_file(char *file, double *position, int timestep, int no_writeouts, int
 		return EXIT_FAILURE;
 	}
 
-	// Upon first time setup, print N and amount of expected writeouts, no check is made, whether the data is actually written
-	if (timestep == 0) {
-		no_writeouts ++;
-		fwrite(&N, sizeof(int), 1, outfile);
-		fwrite(&no_writeouts, sizeof(int), 1, outfile);
-	}
-
-	// Write Parameters to file
+	// Write Parameters to file, no check will be made whether the data is actually written
 	fwrite(&timestep, sizeof(int), 1, outfile);
 	fwrite(position, sizeof(double), 2*N, outfile);
 
@@ -56,17 +76,19 @@ int write_file(char *file, double *position, int timestep, int no_writeouts, int
 
 /*-------------------------------------------------------------------------------------------------------*/
 /* Template for config file:
- * Number of particles (N)              : 1000
- * Energie (k_B*T)				        : 1
- * Dipole interaction relation (Gamma)  : 1
- * Shear rate (shear)                   : 1
- * Brownian Diffusion Time	            : 1
- * Brownian Diffusion		            : 1
- * Time difference (delta_t)            : 2e-7
- * Destination file (outfile)           : great_file_name.txt
- * Iterations                           : 100000
- * Number of Threads                    : 8
- * Writeouts                            : 10
+ * Number of particles (N)              	: 200
+ * Energie (k_B*T)				         	: 1
+ * Dipole interaction relation (Gamma_A)  	: 50
+ * Dipole interaction relation (Gamma_B)  	: 20
+ * Shear rate A (shear_A)               	: 1000
+ * Shear rate B (shear_B)               	: -1000
+ * Brownian Diffusion Time (tau_B)       	: 1
+ * Brownian Diffusion (D_Brown_A)	       	: 1
+ * Time difference (delta_t)            	: 1e-6
+ * Destination file (outfile)           	: /great_file_name.bin
+ * Iterations                           	: 100000
+ * Number of Threads                    	: 4
+ * Writeouts                            	: 1000
  *
  * */
 struct parameters *read_file(char* file) {
@@ -86,25 +108,27 @@ struct parameters *read_file(char* file) {
 	// read input from document, adjust output location and return
 	char temp[1024];
 
-	if ((check = fscanf(infile, "Number of particles (N)              : %d\n",  (&(param->N)))) < 1)
+	if ((check = fscanf(infile, "Number of particles (N)              	: %d\n",  (&(param->N)))) < 1)
 		return NULL;
-	if ((check = fscanf(infile, "Energie (k_B*T)				      : %lf\n", (&(param->kT)))) < 1)
+	if ((check = fscanf(infile, "Energie (k_B*T)				      	: %lf\n", (&(param->kT)))) < 1)
 		return NULL;
-	if ((check = fscanf(infile, "Dipole interaction relation (Gamma)  : %lf\n", (&(param->Gamma)))) < 1)
+	if ((check = fscanf(infile, "Dipole interaction relation (Gamma_A)	: %lf\n", (&(param->Gamma_A)))) < 1)
 		return NULL;
-	if ((check = fscanf(infile, "Shear rate A (shear_A)               : %lf\n", (&(param->shear_A)))) < 1)
+	if ((check = fscanf(infile, "Dipole interaction relation (Gamma_B)	: %lf\n", (&(param->Gamma_B)))) < 1)
 		return NULL;
-	if ((check = fscanf(infile, "Shear rate B (shear_B)               : %lf\n", (&(param->shear_B)))) < 1)
+	if ((check = fscanf(infile, "Shear rate A (shear_A)               	: %lf\n", (&(param->shear_A)))) < 1)
 		return NULL;
-	if ((check = fscanf(infile, "Brownian Diffusion Time	          : %lf\n", (&(param->tau_B)))) < 1)
+	if ((check = fscanf(infile, "Shear rate B (shear_B)               	: %lf\n", (&(param->shear_B)))) < 1)
 		return NULL;
-	if ((check = fscanf(infile, "Brownian Diffusion		              : %lf\n", (&(param->D_Brown)))) < 1)
+	if ((check = fscanf(infile, "Brownian Diffusion Time (tau_B)       	: %lf\n", (&(param->tau_B)))) < 1)
 		return NULL;
-	if ((check = fscanf(infile, "Time difference (delta_t)            : %lf\n", (&(param->timestep)))) < 1)
+	if ((check = fscanf(infile, "Brownian Diffusion (D_Brown_A)	       	: %lf\n", (&(param->D_Brown_A)))) < 1)
 		return NULL;
-	if ((check = fscanf(infile, "Destination file (outfile)           : %s\n",  temp)) < 1)
+	if ((check = fscanf(infile, "Time difference (delta_t)            	: %lf\n", (&(param->timestep)))) < 1)
 		return NULL;
-	if ((check = fscanf(infile, "Iterations                           : %d\n",  (&(param->max_timesteps)))) < 1)
+	if ((check = fscanf(infile, "Destination file (outfile)           	: %s\n",  temp)) < 1)
+		return NULL;
+	if ((check = fscanf(infile, "Iterations                           	: %d\n",  (&(param->max_timesteps)))) < 1)
 		return NULL;
 	if ((check = fscanf(infile, "Number of Threads                    : %d\n",  (&(param->thread_number)))) < 1)
 		return NULL;

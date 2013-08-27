@@ -99,7 +99,7 @@ int graphicOutput () {
 	}
 
 	// get the picture of our dot
-	ball = SDL_LoadBMP("Dot_3x3px.bmp");
+	ball = SDL_LoadBMP("Black_Dot_3x3px.bmp");
 	if (ball == NULL) {
 		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
 		return EXIT_FAILURE;
