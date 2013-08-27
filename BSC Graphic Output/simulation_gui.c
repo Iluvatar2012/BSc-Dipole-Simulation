@@ -77,7 +77,7 @@ int fileIO (char* file) {
 int graphicOutput () {
 
 	// create everything we need to show the simulation
-	SDL_Surface	*screen, *ball;
+	SDL_Surface	*screen, *ball_black, *ball_red;
 	SDL_Rect	dst;
 	SDL_Event	event;
 
@@ -98,16 +98,26 @@ int graphicOutput () {
 		return EXIT_FAILURE;
 	}
 
-	// get the picture of our dot
-	ball = SDL_LoadBMP("Black_Dot_3x3px.bmp");
-	if (ball == NULL) {
+	// get the picture of the black dot
+	ball_black = SDL_LoadBMP("Black_Dot_3x3px.bmp");
+	if (ball_black == NULL) {
+		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
+		return EXIT_FAILURE;
+	}
+
+	// get the picture of the red dot
+	ball_red = SDL_LoadBMP("Red_Dot_3x3px.bmp");
+	if (ball_red == NULL) {
 		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
 		return EXIT_FAILURE;
 	}
 
 	// get the height and width of our image, needed to blit it to screen
-	dst.w = ball->w;
-	dst.h = ball->h;
+	dst.w = ball_black->w;
+	dst.h = ball_black->h;
+
+	dst.w = ball_red->w;
+	dst.h = ball_red->h;
 
 	// variables for checking various states (terminating, what frame to show and whether a key was pressed)
 	int	done 		= 0;
@@ -128,8 +138,8 @@ int graphicOutput () {
 	int	scrWidth 	= screen->w;
 	int scrHeight 	= screen->h;
 
-	double picWidth		= ball->w;
-	double picHeight	= ball->h;
+	double picWidth		= ball_black->w;
+	double picHeight	= ball_black->h;
 
 	double posY;
 
@@ -212,8 +222,11 @@ int graphicOutput () {
 			dst.x = round((positions[counter*2*N+2*i]/L)  *scrWidth -picWidth/2.);
 			dst.y = round((posY/L)*scrHeight-picHeight/2.);
 
-			// copy image to screen
-			SDL_BlitSurface(ball, NULL, screen, &dst);
+			// copy image to screen according to whether we need a red or black dot
+			if (i%2 == 0)
+				SDL_BlitSurface(ball_black, NULL, screen, &dst);
+			else
+				SDL_BlitSurface(ball_red, NULL, screen, &dst);
 		}
 
 		// flip screen and show other buffer
@@ -224,7 +237,8 @@ int graphicOutput () {
 	}
 
 	// clear memory of everything cluttering it
-	SDL_FreeSurface(ball);
+	SDL_FreeSurface(ball_black);
+	SDL_FreeSurface(ball_red);
 
 	// return to caller
 	return EXIT_SUCCESS;
