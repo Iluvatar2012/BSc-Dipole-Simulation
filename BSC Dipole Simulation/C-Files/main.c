@@ -216,25 +216,55 @@ int init(void) {
 		return EXIT_FAILURE;
 	}
 
-	// compute initial particle positions, the particles shall be placed upon an evenly spaced grid
-//	double init_x = 0;
-//	double init_y = 0;
+/*	// compute initial particle positions, the particles shall be placed upon an evenly spaced grid
+	double init_x = 0;
+	double init_y = 0;
 
 	for(int i=0; i<(2*N); i+=2) {
-//		init_x += L/(sqrt(N));
-//		if (init_x >= L) {
-//			init_x = (init_x/L-(int)(init_x/L))*L;
-//			init_y += L/sqrt(N);
-//		}
+		init_x += L/(sqrt(N));
+		if (init_x >= L) {
+			init_x = (init_x/L-(int)(init_x/L))*L;
+			init_y += L/sqrt(N);
+		}
 
-//		position[i] 	= init_x;
-//		position[i+1] 	= init_y;
-
-		// try using random positions for all particles
-		position[i]		= (rand()/(double)RAND_MAX)*L;
-		position[i+1]	= (rand()/(double)RAND_MAX)*L;
+		position[i] 	= init_x;
+		position[i+1] 	= init_y;
 	}
+	*/
 
+	// compute initial particle positions, the particles shall be placed randomly with minimum distance criteria
+	short done;
+	double dx;
+	double dy;
+	double minDist = 0.2;
+
+	// iterate over all particles
+	for (int i=0; i<(2*N); i+=2) {
+
+		//reset checking variable (1 = TRUE, 0 = FALSE)
+		done = 1;
+
+		// repeat until all particles meet the minimum distance criterium
+		do {
+			// try using random positions for all particles
+			position[i]		= (rand()/(double)RAND_MAX)*L;
+			position[i+1]	= (rand()/(double)RAND_MAX)*L;
+
+			// check all particles already placed
+			for (int j=0; j<i; j+=2) {
+				// compute distance of the two particles
+				dx = position[j] 	- position[i];
+				dy = position[j+1] 	- position[i+1];
+
+				// check whether the minimum distance of particles is met, break loop if not
+				if (dx*dx+dy*dy < minDist*minDist) {
+					done = 0;
+					break;
+				}
+			}
+		} while (done == 0);
+
+	}
 	// initiate Verlet list
 	update_verlet();
 	return EXIT_SUCCESS;
