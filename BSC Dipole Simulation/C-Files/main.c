@@ -474,14 +474,12 @@ static void *iteration (int *no) {
 				verlet_max[2*(*no)+1] = temp;
 			}
 
-			// Calculate x and y positions with periodic boundary conditions, save what row the particle travelled from
+			// Calculate x positions with periodic boundary conditions, check whether the particle moved from one row to another
 			position[2*i] 	-= floor(position[2*i]/L)*L;
+			position[2*i]	-= (floor((position[2*i+1]+L)/L)-1)*(*box_one);
 
-			temp = (position[2*i+1] + L)/L;
+			// Calculate y positions with periodic boundary conditions
 			position[2*i+1] -= floor(position[2*i+1]/L)*L;
-
-			// check whether the particle moved from one box to another, function: ((int)((y+L)/L)-1 gives the signum of the row traveled from (0 if still in the same row)
-			position[2*i] -= (((int)(temp))-1)*(*box_one);
 		}
 
 		// compute new positions for particles B from forces, remember periodic boundary conditions
@@ -517,14 +515,12 @@ static void *iteration (int *no) {
 				verlet_max[2*(*no)+1] = temp;
 			}
 
-			// Calculate x and y positions with periodic boundary conditions, save what row the particle traveled from
+			// Calculate x positions with periodic boundary conditions, check whether the particle moved from one row to another
 			position[2*i] 	-= floor(position[2*i]/L)*L;
+			position[2*i]	-= (floor((position[2*i+1]+L)/L)-1)*(*box_two);
 
-			temp = (position[2*i+1] + L)/L;
+			// Calculate y positions with periodic boundary conditions
 			position[2*i+1] -= floor(position[2*i+1]/L)*L;
-
-			// check whether the particle moved from one box to another, function: ((int)((y+L)/L)-1 gives the signum of the row traveled from (0 if still in the same row)
-			position[2*i] -= (((int)(temp))-1)*(*box_two);
 		}
 		// Signal to main thread, that all threads have finished their iteration
 		pthread_barrier_wait(&barrier_main_one);
