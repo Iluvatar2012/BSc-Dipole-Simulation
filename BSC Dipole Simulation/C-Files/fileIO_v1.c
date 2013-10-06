@@ -79,7 +79,7 @@ int write_file(double *position, int timestep, int N) {
  * Number of particles (N)              	: 200
  * Energie (k_B*T)				         	: 1
  * Dipole interaction relation (Gamma_A)  	: 50
- * Dipole interaction relation (Gamma_B)  	: 20
+ * Particle size ratio (size_ratio)			: 1.61
  * Shear rate A (shear_A)               	: 1000
  * Shear rate B (shear_B)               	: -1000
  * Brownian Diffusion Time (tau_B)       	: 1
@@ -114,7 +114,7 @@ struct parameters *read_file(char* file) {
 		return NULL;
 	if ((check = fscanf(infile, "Dipole interaction relation (Gamma_A)	: %lf\n", (&(param->Gamma_A)))) < 1)
 		return NULL;
-	if ((check = fscanf(infile, "Dipole interaction relation (Gamma_B)	: %lf\n", (&(param->Gamma_B)))) < 1)
+	if ((check = fscanf(infile, "Particle size ratio (size_ratio)		: %lf\n", (&(param->size_ratio)))) < 1)
 		return NULL;
 	if ((check = fscanf(infile, "Shear rate A (shear_A)               	: %lf\n", (&(param->shear_A)))) < 1)
 		return NULL;

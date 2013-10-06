@@ -85,7 +85,7 @@ static int 	  no_writeouts;
 // Particle properties
 static double kT;
 static double Gamma_A;
-static double Gamma_B;
+static double size_ratio;
 static double m;
 
 // Arrays for mechanical movement
@@ -142,7 +142,7 @@ int read_struct (char* infile) {
 	N 			= param->N;
 	kT			= param->kT;
 	Gamma_A		= param->Gamma_A;
-	Gamma_B		= param->Gamma_B;
+	size_ratio 	= param->size_ratio;
 	shear_A		= param->shear_A;
 	shear_B		= param->shear_B;
 	tau_B		= param->tau_B;
@@ -167,15 +167,15 @@ int init(void) {
     time(&t);
     srand((unsigned int)t);
 
-	// compute Boxlength from a = sqrt(L²/(PI*N)) = 1, or, more inaccurately, narrow a as side of a box
-	// so that: a = sqrt(L²/N) = 1
+	// compute Boxlength from a = sqrt(L²/(PI*N)) = 1, or, more inaccurately, narrow a as side of a box so that: a = sqrt(L²/N) = 1
 //	L = sqrt(PI*N);
 	L 	= sqrt(N);
 	Li 	= 1.0/L;
 
-	// compute diffusion value of particle B
-	m			= Gamma_B/Gamma_A;
-	D_Brown_B 	= D_Brown_A/m;
+	// compute diffusion value of particle B and interaction relation
+	m			= 1/(size_ratio*size_ratio*size_ratio);
+	D_Brown_B 	= D_Brown_A*size_ratio;
+	fprintf(stderr, "m: %lf, D_B: %lf\n", m, D_Brown_B);
 
 	// set values of remaining static variables
 	delta_t				= tau_B * timestep;
@@ -263,8 +263,8 @@ int init(void) {
 				}
 			}
 		} while (done == 0);
-
 	}
+
 	// initiate Verlet list
 	update_verlet();
 	return EXIT_SUCCESS;
@@ -370,7 +370,7 @@ static void *iteration (int *no) {
 				xj = position[2*j];
 				yj = position[2*j+1];
 
-				// assign the appropriate interaction relation to the particle, depending whether it has even or uneven number
+				// assign the appropriate interaction relation to the particle, depending whether it has even or uneven index
 				m_j = (j%2)*m + (j+1)%2;
 
 				// Get the distance between both particles

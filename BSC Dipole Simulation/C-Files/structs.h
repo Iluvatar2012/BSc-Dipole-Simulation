@@ -18,7 +18,7 @@ struct parameters {
 	int 	N;
 	double	kT;
 	double 	Gamma_A;
-	double 	Gamma_B;
+	double 	size_ratio;
 	double 	shear_A;
 	double	shear_B;
 	double	tau_B;
