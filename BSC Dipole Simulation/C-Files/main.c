@@ -241,11 +241,11 @@ int init(void) {
 	// iterate over all particles
 	for (int i=0; i<(2*N); i+=2) {
 
-		//reset checking variable (1 = TRUE, 0 = FALSE)
-		done = 1;
-
 		// repeat until all particles meet the minimum distance criterium
 		do {
+			//reset checking variable (1 = TRUE, 0 = FALSE)
+			done = 1;
+
 			// try using random positions for all particles
 			position[i]		= (rand()/(double)RAND_MAX)*L;
 			position[i+1]	= (rand()/(double)RAND_MAX)*L;
@@ -348,7 +348,7 @@ static void *iteration (int *no) {
 		shear_two = shear_A;
 	}
 
-	// let the simulation run until the thread is terminate... a little ugly here
+	// let the simulation run until the thread is terminated... a little ugly here
 	while(1) {
 		// iterate 2D-forces over all particles A in Verlet-List
 		for (int i=min; i<max; i+=2) {
