@@ -130,9 +130,9 @@ struct parameters *read_file(char* file) {
 		return NULL;
 	if ((check = fscanf(infile, "Iterations                           	: %d\n",  (&(param->max_timesteps)))) < 1)
 		return NULL;
-	if ((check = fscanf(infile, "Number of Threads                    : %d\n",  (&(param->thread_number)))) < 1)
+	if ((check = fscanf(infile, "Number of Threads                      : %d\n",  (&(param->thread_number)))) < 1)
 		return NULL;
-	if ((check = fscanf(infile, "Writeouts                            : %d",    (&(param->no_writeouts)))) < 1)
+	if ((check = fscanf(infile, "Writeouts                              : %d",    (&(param->no_writeouts)))) < 1)
 		return NULL;
 
 	// Concatenate current working directory with filename from config file, close the file stream
