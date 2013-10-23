@@ -67,9 +67,10 @@
 
 // Own header files
 #include "simulation.h"
-#include "fileIO_v1.h"
+#include "read_config.h"
 #include "extendedmath.h"
 #include "structs.h"
+#include "hdf5_output.h"
 
 /*-------------------------------------------------------------------------------------------------------*/
 // Basic values of Simulation
@@ -544,10 +545,11 @@ void simulation (void) {
 	timesteps = 0;
 
 	// initialize file and write first time setup of the system
-	if (init_file(outfile, no_writeouts, N) == EXIT_FAILURE)
+	if (create_file(outfile, N, no_writeouts) == EXIT_FAILURE)
 		exit(EXIT_FAILURE);
 
-	write_file(position, timesteps, N);
+	//write_file(position, timesteps, N);
+	write_data(timesteps, position);
 
 	// increase timestep counter and compute write-out interval
 	timesteps ++;
@@ -578,7 +580,6 @@ void simulation (void) {
 
 	while (timesteps <= max_timesteps) {
 		// Synchronize all threads
-//		fprintf(stderr, "Timestep: %d\n", timesteps);
 		pthread_barrier_wait(&barrier_main_one);
 
 
@@ -607,7 +608,7 @@ void simulation (void) {
 
 		// check whether parameters should be written to declared external file
 		if ((timesteps%no_writeouts) == 0) {
-			write_file(position, timesteps, N);
+			write_data(timesteps, position);
 		}
 
 		// increase timesteps and continue waiting threads

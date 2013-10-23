@@ -19,18 +19,17 @@
  *      Author: 		Aiko Bernehed
  */
 
-#include "fileIO_v1.h"
 #include "structs.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 // variables for initiating the read parameter
-static char* file;
+//static char* file;
 
 
 /*-------------------------------------------------------------------------------------------------------*/
-int init_file(char* infile, int no_writeouts, int N) {
+/*int init_file(char* infile, int no_writeouts, int N) {
 	file = infile;
 
 	// Open file, check whether operation was successful
@@ -53,7 +52,7 @@ int init_file(char* infile, int no_writeouts, int N) {
 }
 
 /*-------------------------------------------------------------------------------------------------------*/
-int write_file(double *position, int timestep, int N) {
+/*int write_file(double *position, int timestep, int N) {
 
 	// Open file, check whether operation was successful
 	FILE *outfile = fopen(file, "a+");
