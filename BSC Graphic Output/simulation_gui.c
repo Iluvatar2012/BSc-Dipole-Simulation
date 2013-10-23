@@ -16,6 +16,8 @@
 
 #include <SDL/SDL.h>
 
+#include <hdf5.h>
+
 #define PI 			3.14159265358979323846264338328
 
 
@@ -25,12 +27,50 @@ static int* 	timestep;
 static double* 	positions;
 
 /*----------------------------------------------------------------------------------------------------------------------------*/
+int hdf5_read (char* file) {
+
+	// identifiers for files and a status variable
+	hid_t	file_id, dataset_id, attr_write_id, attr_N_id;
+	herr_t	status;
+
+	// open the file, check whether operation was successful
+	file_id 		= H5Fopen(file, H5F_ACC_RDONLY, H5P_DEFAULT);
+
+	if (file_id < 0) {
+		fprintf(stderr, "File could not be opened, program will now terminate!\nPath: %s\n", file);
+		return EXIT_FAILURE;
+	}
+
+	// open the dataset and attributes
+	dataset_id		= H5Dopen2(file_id, "/positions", H5P_DEFAULT);
+
+	attr_N_id		= H5Aopen(dataset_id, "N", H5P_DEFAULT);
+	attr_write_id	= H5Aopen(dataset_id, "Writeouts", H5P_DEFAULT);
+
+	// read the attributes
+	status	= H5Aread(attr_N_id, H5T_NATIVE_INT, &N);
+	status	= H5Aread(attr_write_id, H5T_NATIVE_INT, &steps);
+
+	// initiate a temporary array and allocate memory for the position data
+	double* temp	= malloc(2*N*sizeof(double));
+	positions 		= malloc(steps*2*N*sizeof(double));
+
+	// iterate over all steps and copy them all into the position array
+	for (int i=0; i<steps; i++) {
+
+	}
+
+	// return to caller
+	return EXIT_SUCCESS;
+}
+
+/*----------------------------------------------------------------------------------------------------------------------------*/
 // TODO: write function description
 int fileIO (char* file) {
 	// Open file, check if successful
 	FILE* infile = fopen(file, "r");
 	if (infile == NULL) {
-		fprintf(stderr, "File could not be opened, function exits...\nPath: %s", file);
+		fprintf(stderr, "File could not be opened, function exits...\nPath: %s\n", file);
 		return EXIT_FAILURE;
 	}
 
