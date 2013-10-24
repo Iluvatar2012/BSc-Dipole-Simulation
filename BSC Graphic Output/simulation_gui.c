@@ -23,14 +23,17 @@
 
 static int 		N;
 static int 		steps;
-static int* 	timestep;
 static double* 	positions;
 
 /*----------------------------------------------------------------------------------------------------------------------------*/
 int hdf5_read (char* file) {
 
+	// basic variables
+	double* temp;
+
 	// identifiers for files and a status variable
-	hid_t	file_id, dataset_id, attr_write_id, attr_N_id;
+	hid_t	file_id, dataset_id, tempset_id, attr_write_id, attr_N_id;
+	hid_t	dataspace_id;
 	herr_t	status;
 
 	// open the file, check whether operation was successful
@@ -51,64 +54,36 @@ int hdf5_read (char* file) {
 	status	= H5Aread(attr_N_id, H5T_NATIVE_INT, &N);
 	status	= H5Aread(attr_write_id, H5T_NATIVE_INT, &steps);
 
-	// initiate a temporary array and allocate memory for the position data
-	double* temp	= malloc(2*N*sizeof(double));
+	// allocate memory for the temporary data and positions
+	temp			= malloc(2*N*sizeof(double));
 	positions 		= malloc(steps*2*N*sizeof(double));
+
+	// offset and dimension of a hyperslab
+	hsize_t	offset[2]	= {0, 0};
+	hsize_t	slabdim[2]	= {1, 2*N};
+
+	// get the data space of the current dataset and initialize a buffer for reading data
+	dataspace_id	= H5Dget_space(dataset_id);
+	tempset_id 		= H5Screate_simple(2, slabdim, NULL);
 
 	// iterate over all steps and copy them all into the position array
 	for (int i=0; i<steps; i++) {
 
-	}
+		// adjust offset to the next slab
+		offset[0] = i;
 
-	// return to caller
-	return EXIT_SUCCESS;
-}
+		// select the hyperslab and read into position array
+		status = H5Sselect_hyperslab(dataspace_id, H5S_SELECT_SET, offset, NULL, slabdim, NULL);
+		status = H5Dread(dataset_id, H5T_NATIVE_DOUBLE, tempset_id, dataspace_id, H5P_DEFAULT, temp);
 
-/*----------------------------------------------------------------------------------------------------------------------------*/
-// TODO: write function description
-int fileIO (char* file) {
-	// Open file, check if successful
-	FILE* infile = fopen(file, "r");
-	if (infile == NULL) {
-		fprintf(stderr, "File could not be opened, function exits...\nPath: %s\n", file);
-		return EXIT_FAILURE;
-	}
-
-	// read N from file, exit if there is an error
-	unsigned int temp;
-	temp = fread(&N, sizeof(int), 1, infile);
-
-	if(temp < 1) {
-		fprintf(stderr, "N could not be read, function exits... Temp: %d\n", (int)(temp));
-		return EXIT_FAILURE;
-	}
-
-	// read the amount of timesteps from the file, exit if there is an error
-	temp = fread(&steps, sizeof(int), 1, infile);
-
-	if( temp < 1) {
-		fprintf(stderr, "steps could not be read from file, function exits... Temp: %d\n", (int)(temp));
-		return EXIT_FAILURE;
-	}
-
-	// allocate memory for position and timestep array, check whether operation went well
-	timestep = 	malloc(steps*sizeof(int));
-	positions = malloc(steps*2*N*sizeof(double));
-
-	if (timestep == NULL || positions == NULL) {
-		fprintf(stderr, "Memory for timesteps and/or positions could not be allocated, function exits...\n");
-		return EXIT_FAILURE;
-	}
-
-	// read timesteps
-	for (int i=0; i<steps; i++) {
-		fread(&(timestep[i]), sizeof(int), 1, infile);
-		if ((temp = fread(&(positions[2*N*i]), sizeof(double), 2*N, infile)) < 2*N) {
-			fprintf(stderr, "Error reading position data, function exits... Temp: %d\n", (int)(temp));
-			return EXIT_FAILURE;
+		// copy the data from the buffer to the position array
+		for (int j=0; j<2*N; j+=2) {
+			positions[2*N*i + j] 	= temp[j];
+			positions[2*N*i + j+1]	= temp[j+1];
 		}
 	}
 
+	// return to caller
 	return EXIT_SUCCESS;
 }
 
@@ -302,7 +277,8 @@ int main (int argcount, char** argvektor) {
 	}
 
 	// Read file, needed for parameters for graphic output
-	int check = fileIO(infile);
+	//int check = fileIO(infile);
+	int check = hdf5_read(infile);
 	if (check != EXIT_SUCCESS) {
 		return EXIT_FAILURE;
 	}
