@@ -16,14 +16,21 @@ static char* 	file;
 static hsize_t	dims[2];
 static hsize_t	chunkdims[2];
 
-/*-------------------------------------------------------------------------------------------------------*/
-int create_file (char* infile, int N, int writeouts) {
+// various variables
+static int 	counter;
+static int 	N;
 
-	// save the name of the file, this way we always use the same file throughout one run
-	file = infile;
+/*-------------------------------------------------------------------------------------------------------*/
+int create_file (char* infile, int inN, int writeouts) {
+
+	// save the name of the file, this way we always use the same file throughout one run, initiate counter
+	file 	= infile;
+	N		= inN;
+	counter	= -1;
 
 	// identifiers of all relevant spaces and chunking properties
-	hid_t	file_id, dataspace_id, dataset_id, attr_space_id_1, attr_space_id_2, attr_id_1, attr_id_2;
+	hid_t	file_id, dataspace_id, dataset_id;
+	hid_t	attr_space_id_1, attr_space_id_2, attr_space_id_3, attr_id_1, attr_id_2, attr_id_3;
 	hid_t	property;
 
 	// checking value whether operations were successful
@@ -40,9 +47,8 @@ int create_file (char* infile, int N, int writeouts) {
 	hsize_t maxdims[2] 		= {H5S_UNLIMITED, 2*N};
 	hsize_t attr_dim		= 1;
 
-	// create new file using the identifier, check whether file has previously been opened
+	// create new file using the identifier, check whether file already exists
 	if ((file_id = H5Fcreate(file, H5F_ACC_EXCL, H5P_DEFAULT, H5P_DEFAULT)) < 0 ) {
-		fprintf(stderr, "File already exists, function will exit!\n");
 		return EXIT_FAILURE;
 	}
 
@@ -56,21 +62,26 @@ int create_file (char* infile, int N, int writeouts) {
 	// create a new dataset for the positions of all particles, at this point the dataset will have dimension zero
 	dataset_id		= H5Dcreate2(file_id, "/positions", H5T_NATIVE_DOUBLE, dataspace_id, H5P_DEFAULT, property, H5P_DEFAULT);
 
-	// create new dataspaces for the attributes (writeouts and N) and the attributes themselves
+	// create new dataspaces for the attributes (writeouts, N, amount of data written, and name of the config file) and the attributes themselves
 	attr_space_id_1	= H5Screate_simple(1, &attr_dim, NULL);
 	attr_space_id_2 = H5Screate_simple(1, &attr_dim, NULL);
+	attr_space_id_3 = H5Screate_simple(1, &attr_dim, NULL);
 	attr_id_1		= H5Acreate2(dataset_id, "Writeouts", H5T_NATIVE_INT, attr_space_id_1, H5P_DEFAULT, H5P_DEFAULT);
 	attr_id_2		= H5Acreate2(dataset_id, "N", H5T_NATIVE_INT, attr_space_id_2, H5P_DEFAULT, H5P_DEFAULT);
+	attr_id_3		= H5Acreate2(dataset_id, "Last_Writeout", H5T_NATIVE_INT, attr_space_id_3, H5P_DEFAULT, H5P_DEFAULT);
 
 	// write the attributes
 	status = H5Awrite(attr_id_1, H5T_NATIVE_INT, &writeouts);
 	status = H5Awrite(attr_id_2, H5T_NATIVE_INT, &N);
+	status = H5Awrite(attr_id_3, H5T_NATIVE_INT, &counter);
 
 	// terminate access to all parts of the document and close the file
 	status = H5Aclose(attr_id_1);
 	status = H5Aclose(attr_id_2);
+	status = H5Aclose(attr_id_3);
 	status = H5Sclose(attr_space_id_1);
 	status = H5Sclose(attr_space_id_2);
+	status = H5Sclose(attr_space_id_3);
 
 	status = H5Dclose(dataset_id);
 	status = H5Sclose(dataspace_id);
@@ -88,7 +99,7 @@ int create_file (char* infile, int N, int writeouts) {
 void write_data(int timestep, double* position) {
 
 	// variables for IDs of the file, dataset and attribute
-	hid_t	file_id, dataset_id;
+	hid_t	file_id, dataset_id, attr_id;
 	hid_t	tempset_id, dataspace_id;
 
 	// default error variable
@@ -110,7 +121,7 @@ void write_data(int timestep, double* position) {
 	dims[0]++;
 	H5Dset_extent(dataset_id, dims);
 
-	// create a temporary dataset, which will be used to write the current positions to the file
+	// create a temporary dataspace, which will be used to write the current positions to the file
 	tempset_id = H5Screate_simple(2, chunkdims, NULL);
 
 	// get the current dataspace and select one hyperslab
@@ -125,12 +136,74 @@ void write_data(int timestep, double* position) {
 		exit(1);
 	}
 
+	// open an attribute, increase the current counter and write the counter to the attribute
+	counter++;
+	attr_id = H5Aopen(dataset_id, "Last_Writeout", H5P_DEFAULT);
+	status 	= H5Awrite(attr_id, H5T_NATIVE_INT, &counter);
+
+
 	// terminate access to all parts of the file and close the latter
 	status = H5Sclose(tempset_id);
+	status = H5Aclose(attr_id);
 	status = H5Sclose(dataspace_id);
 	status = H5Dclose(dataset_id);
 	status = H5Fclose(file_id);
 
 	// tell user, that file has been written
 	fprintf(stderr, "Completed writing file on timestep: %d\n", timestep);
+}
+
+/*-------------------------------------------------------------------------------------------------------*/
+int reopen_file(double* position, int* writeouts, int* count_written) {
+
+	// various identifiers
+	hid_t	file_id, dataset_id, attr_id;
+	hid_t	dataspace_id, tempspace_id;
+
+	// default error variable
+	herr_t 	status;
+
+	// open file, dataset and an attribute
+	file_id 	= H5Fopen(file, H5F_ACC_RDONLY, H5P_DEFAULT);
+	dataset_id 	= H5Dopen2(file_id, "/positions", H5P_DEFAULT);
+	attr_id 	= H5Aopen(dataset_id, "Last_Writeout", H5P_DEFAULT);
+
+	// copy the attribute into counter variable
+	status	= H5Aread(attr_id, H5T_NATIVE_INT, &counter);
+
+	// check whether the file has been fully written, terminate if it has completed
+	if (counter == *writeouts) {
+		fprintf(stderr, "File is complete, program will terminate. \n");
+
+		status = H5Aclose(attr_id);
+		status = H5Dclose(dataset_id);
+		status = H5Fclose(file_id);
+
+		return EXIT_FAILURE;
+	}
+
+	// variables for offset and size of data copied
+	hsize_t offset[2] 	= {counter, 0};
+	hsize_t slabdim[2] 	= {1, 2*N};
+
+	// select a hyperslab of the last positions stored in the file and save it to the position array
+	tempspace_id = H5Screate_simple(2, slabdim, NULL);
+	dataspace_id = H5Dget_space(dataset_id);
+
+	status = H5Sselect_hyperslab(dataspace_id, H5S_SELECT_SET, offset, NULL, slabdim, NULL);
+	status = H5Dread(dataset_id, H5T_NATIVE_DOUBLE, tempspace_id, dataspace_id, H5P_DEFAULT, position);
+
+	// copy how many iterations have already been written to the file
+	*count_written 	= counter;
+	dims[0]			= counter+1;
+
+	// terminate all access to and close the file
+	status = H5Aclose(attr_id);
+	status = H5Dclose(dataset_id);
+	status = H5Sclose(tempspace_id);
+	status = H5Sclose(dataspace_id);
+	status = H5Fclose(file_id);
+
+	// return to caller
+	return EXIT_SUCCESS;
 }

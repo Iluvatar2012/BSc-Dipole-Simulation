@@ -20,7 +20,6 @@
 
 #define PI 			3.14159265358979323846264338328
 
-
 static int 		N;
 static int 		steps;
 static double* 	positions;
@@ -67,7 +66,7 @@ int hdf5_read (char* file) {
 	tempset_id 		= H5Screate_simple(2, slabdim, NULL);
 
 	// iterate over all steps and copy them all into the position array
-	for (int i=0; i<steps; i++) {
+	for (int i=0; i<=steps; i++) {
 
 		// adjust offset to the next slab
 		offset[0] = i;

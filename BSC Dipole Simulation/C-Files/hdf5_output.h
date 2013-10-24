@@ -10,5 +10,6 @@
 
 extern int 	create_file (char*, int, int);
 extern void	write_data(int, double*);
+extern int 	reopen_file(double*, int*, int*);
 
 #endif /* HDF5_WRITE_H_ */

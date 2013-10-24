@@ -176,7 +176,6 @@ int init(void) {
 	// compute diffusion value of particle B and interaction relation
 	m			= 1/(size_ratio*size_ratio*size_ratio);
 	D_Brown_B 	= D_Brown_A*size_ratio;
-	fprintf(stderr, "m: %lf, D_B: %lf\n", m, D_Brown_B);
 
 	// set values of remaining static variables
 	delta_t				= tau_B * timestep;
@@ -545,11 +544,20 @@ void simulation (void) {
 	timesteps = 0;
 
 	// initialize file and write first time setup of the system
-	if (create_file(outfile, N, no_writeouts) == EXIT_FAILURE)
-		exit(EXIT_FAILURE);
+	if (create_file(outfile, N, no_writeouts) == EXIT_FAILURE) {
+		// variable for storing the amount of data already written
+		int written;
+		if (reopen_file(position, &no_writeouts, &written) == EXIT_FAILURE)
+			exit(EXIT_FAILURE);
 
-	//write_file(position, timesteps, N);
-	write_data(timesteps, position);
+		// iterate what timestep we are at
+		timesteps = max_timesteps/no_writeouts * written;
+		fprintf(stderr, "Timestep: %d\n", timesteps);
+	}
+	else {
+		//write_file(position, timesteps, N);
+		write_data(timesteps, position);
+	}
 
 	// increase timestep counter and compute write-out interval
 	timesteps ++;
