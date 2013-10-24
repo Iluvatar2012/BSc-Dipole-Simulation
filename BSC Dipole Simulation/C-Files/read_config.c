@@ -24,55 +24,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// variables for initiating the read parameter
-//static char* file;
-
-
-/*-------------------------------------------------------------------------------------------------------*/
-/*int init_file(char* infile, int no_writeouts, int N) {
-	file = infile;
-
-	// Open file, check whether operation was successful
-	FILE *outfile = fopen(file, "a+");
-	if (outfile == NULL) {
-		fprintf(stderr, "The file %s could not be opened on initialization.\n", file);
-		return EXIT_FAILURE;
-	}
-
-	// Upon first time setup, print N and amount of expected writeouts, no check is made, whether the data is actually written
-	no_writeouts ++;
-	fwrite(&N, sizeof(int), 1, outfile);
-	fwrite(&no_writeouts, sizeof(int), 1, outfile);
-
-	// Close outgoing stream
-	fclose(outfile);
-	fprintf(stderr, "Completed initializing outgoing file.\n");
-
-	return EXIT_SUCCESS;
-}
-
-/*-------------------------------------------------------------------------------------------------------*/
-/*int write_file(double *position, int timestep, int N) {
-
-	// Open file, check whether operation was successful
-	FILE *outfile = fopen(file, "a+");
-	if (outfile == NULL) {
-		fprintf(stderr, "The file %s could not be opened on timestep: %d\n", file, timestep);
-		return EXIT_FAILURE;
-	}
-
-	// Write Parameters to file, no check will be made whether the data is actually written
-	fwrite(&timestep, sizeof(int), 1, outfile);
-	fwrite(position, sizeof(double), 2*N, outfile);
-
-
-	// Close outgoing stream
-	fclose(outfile);
-	fprintf(stderr, "Completed writing file on timestep: %d\n", timestep);
-
-	return EXIT_SUCCESS;
-}
-
 /*-------------------------------------------------------------------------------------------------------*/
 /* Template for config file:
  * Number of particles (N)              	: 200

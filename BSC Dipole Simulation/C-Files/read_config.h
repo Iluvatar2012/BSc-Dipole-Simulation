@@ -8,8 +8,6 @@
 #ifndef READ_CONFIG_H_
 #define READ_CONFIG_H_
 
-//extern int					init_file	(char*, int, int);
-//extern int 					write_file 	(double *, int, int);
 extern struct parameters*	read_file	(char*);
 
 #endif /* FILEIO_H_ */
