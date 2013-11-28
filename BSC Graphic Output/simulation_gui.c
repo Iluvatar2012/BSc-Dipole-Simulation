@@ -283,7 +283,6 @@ int main (int argcount, char** argvektor) {
 	}
 
 	// Read file, needed for parameters for graphic output
-	//int check = fileIO(infile);
 	int check = hdf5_read(infile);
 	if (check != EXIT_SUCCESS) {
 		return EXIT_FAILURE;
