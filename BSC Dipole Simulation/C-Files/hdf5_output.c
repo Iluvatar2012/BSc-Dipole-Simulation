@@ -24,9 +24,9 @@ static int 	N;
 int create_file (char* infile, int inN, int writeouts) {
 
 	// save the name of the file, this way we always use the same file throughout one run, initiate counter
-	file 	= infile;
-	N		= inN;
-	counter	= -1;
+	file 		= infile;
+	N			= inN;
+	counter		= -1;
 
 	// identifiers of all relevant spaces and chunking properties
 	hid_t	file_id, dataspace_id, dataset_id;
@@ -97,7 +97,6 @@ int create_file (char* infile, int inN, int writeouts) {
 
 /*-------------------------------------------------------------------------------------------------------*/
 void write_data(int timestep, double* position) {
-
 	// variables for IDs of the file, dataset and attribute
 	hid_t	file_id, dataset_id, attr_id;
 	hid_t	tempset_id, dataspace_id;
@@ -148,9 +147,6 @@ void write_data(int timestep, double* position) {
 	status = H5Sclose(dataspace_id);
 	status = H5Dclose(dataset_id);
 	status = H5Fclose(file_id);
-
-	// tell user, that file has been written
-	fprintf(stderr, "Completed writing file on timestep: %d\n", timestep);
 }
 
 /*-------------------------------------------------------------------------------------------------------*/

@@ -524,7 +524,6 @@ static void *iteration (int *no) {
 		// thread is done with one iteration, it will now wait for a signal from the main thread to continue
 		pthread_barrier_wait(&barrier_main_two);
 	}
-
 	return NULL;
 }
 
@@ -533,6 +532,8 @@ static void *iteration (int *no) {
 void simulation (void) {
 
 	double temp;
+	double perc;
+
 	int timesteps;
 	int ret_thread;
 
@@ -582,6 +583,10 @@ void simulation (void) {
 		}
 	}
 
+	// insert an empty line
+	fprintf(stderr, "\n");
+
+	// iterate over all timesteps
 	while (timesteps <= max_timesteps) {
 		// Synchronize all threads
 		pthread_barrier_wait(&barrier_main_one);
@@ -611,6 +616,26 @@ void simulation (void) {
 		// check whether parameters should be written to declared external file
 		if ((timesteps%no_writeouts) == 0) {
 			write_data(timesteps, position);
+
+			// give a percentage output to user
+			perc = (100.*timesteps)/max_timesteps;
+
+			fprintf(stdout, "Progress: \t\t\t[");
+
+			for(int i=0; i<floor(perc); i++) {
+				fprintf(stdout, "=");
+			}
+
+			if (perc != 100)
+				fprintf(stdout, ">");
+
+			for (int i=floor(perc)+1; i<100; i++) {
+				fprintf(stdout, ".");
+			}
+
+			fprintf(stdout, "] \t\t %.1lf%%\r", perc);
+
+			fflush(stdout);
 		}
 
 		// increase timesteps and continue waiting threads
@@ -618,6 +643,9 @@ void simulation (void) {
 
 		pthread_barrier_wait(&barrier_main_two);
 	}
+
+	// insert an empty line
+	fprintf(stderr, "\n\n");
 
 	// cancel all other threads, we're done here
 	for (int i=0; i<thread_number; i++) {
@@ -635,7 +663,6 @@ void simulation (void) {
 
 	fprintf(stderr, "exiting simulation\n");
 }
-
 
 /*-------------------------------------------------------------------------------------------------------*/
 void update_verlet (void) {
@@ -750,8 +777,6 @@ void update_verlet (void) {
 		verlet_max[2*i] 	= 0;
 		verlet_max[2*i+1]	= 0;
 	}
-
-	fprintf(stderr, "Verlet-list updated...\n");
 }
 
 
