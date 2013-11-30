@@ -1,7 +1,9 @@
 BSC Dipole Simulation/*
-!BSC Dipole Simulation/C-Files/*.[ch]
+!BSC Dipole Simulation/makefile
+!BSC Dipole Simulation/C-Files/*
 BSC Graphic Output/*
 !BSC Graphic Output/*.[ch]
 !BSC Graphic Output/*.bmp
+!BSC Graphic Output/makefile
 .metadata
 Random Tests

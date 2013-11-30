@@ -86,7 +86,6 @@ static int 	  no_writeouts;
 // Particle properties
 static double kT;
 static double Gamma_A;
-static double size_ratio;
 static double m;
 
 // Arrays for mechanical movement
@@ -101,8 +100,6 @@ static double shear_A;
 static double shear_B;
 static double D_Brown_A;
 static double D_Brown_B;
-static double D_kT_A;
-static double D_kT_B;
 static double tau_B;
 static double weigh_brown_A;
 static double weigh_brown_B;
@@ -143,9 +140,8 @@ int read_struct (char* infile) {
 	N 			= param->N;
 	kT			= param->kT;
 	Gamma_A		= param->Gamma_A;
-	size_ratio 	= param->size_ratio;
+	m 			= param->m;
 	shear_A		= param->shear_A;
-	shear_B		= param->shear_B;
 	tau_B		= param->tau_B;
 	D_Brown_A 	= param->D_Brown_A;
 
@@ -173,18 +169,15 @@ int init(void) {
 	L 	= sqrt(N);
 	Li 	= 1.0/L;
 
-	// compute diffusion value of particle B and interaction relation
-	m			= 1/(size_ratio*size_ratio*size_ratio);
-	D_Brown_B 	= D_Brown_A*size_ratio;
+	// compute diffusion value of particle B, interaction relation and initialize shear rate for particles B
+	D_Brown_B 	= D_Brown_A/cbrt(m);
+	shear_B		= 0;
 
 	// set values of remaining static variables
 	delta_t				= tau_B * timestep;
 
 	weigh_brown_A 		= sqrt(2.0 * D_Brown_A * delta_t);
 	weigh_brown_B 		= sqrt(2.0 * D_Brown_B * delta_t);
-
-	D_kT_A 				= D_Brown_A/kT;
-	D_kT_B 				= D_Brown_B/kT;
 
 	box_x_A				= 0;
 	box_x_B				= 0;
@@ -307,6 +300,9 @@ static void *iteration (int *no) {
 
 	double m_j;
 
+	// increase Gamma_A by a factor of 3
+	Gamma_A *= 3;
+
 	if (min%2 == 0){
 		// assign the appropriate shear rate to even and uneven particles
 		box_one = &box_x_A;
@@ -320,12 +316,12 @@ static void *iteration (int *no) {
 		weigh_brown_one = weigh_brown_A;
 		weigh_brown_two = weigh_brown_B;
 
-		D_kT_one = D_kT_A;
-		D_kT_two = D_kT_B;
+		D_kT_one = D_Brown_A/kT;
+		D_kT_two = D_Brown_B/kT;
 
 		// set shear value according to particle index
-		shear_one = shear_A;
-		shear_two = shear_B;
+		shear_one = shear_A * kT/D_Brown_A;
+		shear_two = 0;
 	}
 	else {
 		// assign the appropriate shear rate to even and uneven particles
@@ -340,12 +336,12 @@ static void *iteration (int *no) {
 		weigh_brown_one = weigh_brown_B;
 		weigh_brown_two = weigh_brown_A;
 
-		D_kT_one = D_kT_B;
-		D_kT_two = D_kT_A;
+		D_kT_one = D_Brown_B/kT;
+		D_kT_two = D_Brown_A/kT;
 
 		// set shear value according to particle index
-		shear_one = shear_B;
-		shear_two = shear_A;
+		shear_one = 0;
+		shear_two = shear_A * kT/D_Brown_A;
 	}
 
 	// let the simulation run until the thread is terminated... a little ugly here
@@ -387,7 +383,7 @@ static void *iteration (int *no) {
 
 				// get square of distance and compute force in x and y direction
 				r_squared = dx*dx + dy*dy;
-				temp_force = (m_i_one*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff); // WARNING: this is F/r
+				temp_force = (m_i_one*m_j/sqrt(r_squared))*(Gamma_A/(r_squared*r_squared)-force_cutoff); // WARNING: this is F/r
 
 				force[2*i] 		+= temp_force*dx; // equals F*x/r = F*cos(phi) (x-component)
 				force[2*i+1]	+= temp_force*dy; // equals F*y/r = F*sin(phi) (y-component)
@@ -431,7 +427,7 @@ static void *iteration (int *no) {
 
 				// get square of distance and compute force in x and y direction
 				r_squared = dx*dx + dy*dy;
-				temp_force = (m_i_two*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff); // WARNING: this is F/r
+				temp_force = (m_i_two*m_j/sqrt(r_squared))*(Gamma_A/(r_squared*r_squared)-force_cutoff); // WARNING: this is F/r
 
 				force[2*i] 		+= temp_force*dx; // equals F*x/r = F*cos(phi) (x-component)
 				force[2*i+1]	+= temp_force*dy; // equals F*y/r = F*sin(phi) (y-component)
@@ -460,7 +456,7 @@ static void *iteration (int *no) {
 			g2 = temp*sin(TWO_PI*u2);
 
 			// Calculate next positions and speeds for all particles
-			position[2*i] 	+= D_kT_one*delta_t*(force[2*i]+(position[2*i+1]/L*shear_one)) + weigh_brown_one * g1;
+			position[2*i] 	+= D_kT_one*delta_t*(force[2*i] + position[2*i+1]/L*shear_one) + weigh_brown_one*g1;
 			position[2*i+1] += D_kT_one*delta_t*force[2*i+1] + weigh_brown_one * g2;
 
 			// update list of total displacement for each particle after last verlet-list update
@@ -501,7 +497,7 @@ static void *iteration (int *no) {
 			g2 = temp*sin(TWO_PI*u2);
 
 			// Calculate next positions and speeds for all particles
-			position[2*i] 	+= D_kT_two*delta_t*(force[2*i]+(position[2*i+1]/L*shear_two)) + weigh_brown_two * g1;
+			position[2*i] 	+= D_kT_two*delta_t*(force[2*i] + position[2*i+1]/L*shear_two) + weigh_brown_two*g1;
 			position[2*i+1] += D_kT_two*delta_t*force[2*i+1] + weigh_brown_two * g2;
 
 			// update list of total displacement for each particle after last verlet-list update
@@ -603,9 +599,7 @@ void simulation (void) {
 
 		// adjust orientation of upper and lower box row
 		box_x_A += shear_A*L*delta_t;
-		box_x_B += shear_B*L*delta_t;
 		box_x_A  -= floor(box_x_A/L)*L;
-		box_x_B  -= floor(box_x_B/L)*L;
 
 		// check if verlet list has to be updated
 		if ((verlet_max_1+verlet_max_2) > d_cutoff_verlet) {
@@ -779,8 +773,9 @@ int main(int argcount, char** argvektor) {
 		strncat(infile,"Config_Files/config.txt", length);		// default
 	}
 
-	// get current working directory and pass arguments to file reader
+	// get current working directory, append an "/" and pass arguments to file reader
 	getcwd(outfile, sizeof(outfile));
+	strncat(outfile, "/", 1);
 	int success_check = read_struct(infile);
 
 	// check whether file could be properly read

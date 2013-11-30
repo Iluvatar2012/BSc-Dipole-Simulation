@@ -64,11 +64,9 @@ struct parameters *read_file(char* file) {
 		return NULL;
 	if ((check = fscanf(infile, "Dipole interaction relation (Gamma_A)	: %lf\n", (&(param->Gamma_A)))) < 1)
 		return NULL;
-	if ((check = fscanf(infile, "Particle size ratio (size_ratio)		: %lf\n", (&(param->size_ratio)))) < 1)
+	if ((check = fscanf(infile, "Particle dipole ratio (m)				: %lf\n", (&(param->m)))) < 1)
 		return NULL;
 	if ((check = fscanf(infile, "Shear rate A (shear_A)               	: %lf\n", (&(param->shear_A)))) < 1)
-		return NULL;
-	if ((check = fscanf(infile, "Shear rate B (shear_B)               	: %lf\n", (&(param->shear_B)))) < 1)
 		return NULL;
 	if ((check = fscanf(infile, "Brownian Diffusion Time (tau_B)       	: %lf\n", (&(param->tau_B)))) < 1)
 		return NULL;
