@@ -26,19 +26,18 @@
 
 /*-------------------------------------------------------------------------------------------------------*/
 /* Template for config file:
- * Number of particles (N)              	: 200
- * Energie (k_B*T)				         	: 1
- * Dipole interaction relation (Gamma_A)  	: 50
- * Particle size ratio (size_ratio)			: 1.61
- * Shear rate A (shear_A)               	: 1000
- * Shear rate B (shear_B)               	: -1000
- * Brownian Diffusion Time (tau_B)       	: 1
- * Brownian Diffusion (D_Brown_A)	       	: 1
- * Time difference (delta_t)            	: 1e-6
- * Destination file (outfile)           	: /great_file_name.bin
- * Iterations                           	: 100000
- * Number of Threads                    	: 4
- * Writeouts                            	: 1000
+*	Number of particles (N)              	: 1000
+*	Energie (k_B*T)							: 1
+*	Dipole interaction relation (Gamma_A)  	: 10
+*	Particle dipole ratio (m)				: 0.24
+*	Shear rate A (shear_A)               	: 10
+*	Brownian Diffusion Time (tau_B)       	: 1
+*	Brownian Diffusion (D_Brown_A)	       	: 1
+*	Time difference (delta_t)            	: 1e-6
+*	Destination file (outfile)           	: Results/great_file_name.hdf5
+*	Iterations                           	: 100000
+*	Number of Threads                    	: 8
+*	Writeouts                            	: 1000
  *
  * */
 struct parameters *read_file(char* file) {

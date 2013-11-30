@@ -83,6 +83,7 @@ int create_file (char* infile, int inN, int writeouts) {
 	status = H5Sclose(attr_space_id_2);
 	status = H5Sclose(attr_space_id_3);
 
+	status = H5Pclose(property);
 	status = H5Dclose(dataset_id);
 	status = H5Sclose(dataspace_id);
 	status = H5Fclose(file_id);

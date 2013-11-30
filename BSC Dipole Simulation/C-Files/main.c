@@ -115,14 +115,16 @@ static double  d_cutoff_verlet;
 static double  force_cutoff;
 
 // Other miscellaneous system variables, especially for thread handling
-static char outfile[2048];
-static int* borders;
-static int* numbers;
-static int thread_number;
-static pthread_t* threads;
-static pthread_barrier_t barrier_main_one;
-static pthread_barrier_t barrier_main_two;
-static pthread_barrier_t barrier_internal;
+static char 	outfile[2048];
+static int* 	borders;
+static int* 	numbers;
+static int 		thread_number;
+static short 	cont;
+
+static pthread_t* 			threads;
+static pthread_barrier_t 	barrier_main_one;
+static pthread_barrier_t 	barrier_main_two;
+static pthread_barrier_t 	barrier_internal;
 
 /*-------------------------------------------------------------------------------------------------------*/
 int read_struct (char* infile) {
@@ -341,8 +343,8 @@ static void *iteration (int *no) {
 		shear_two = shear_A * kT/D_Brown_A;
 	}
 
-	// let the simulation run until the thread is terminated... a little ugly here
-	while(1) {
+	// let the simulation run until the thread is terminated
+	while(cont == 1) {
 		// iterate 2D-forces over all particles A in Verlet-List
 		for (int i=min; i<max; i+=2) {
 			// get the position of the current particle
@@ -430,6 +432,10 @@ static void *iteration (int *no) {
 				force[2*i+1]	+= temp_force*dy; // equals F*y/r = F*sin(phi) (y-component)
 			}
 		}
+
+		// check again whether we should return, just to get rid of race conditions
+		if (cont != 1)
+			break;
 
 		// wait for all threads to finish iteration of forces, then continue with writing position data
 		pthread_barrier_wait(&barrier_internal);
@@ -521,6 +527,7 @@ static void *iteration (int *no) {
 		// thread is done with one iteration, it will now wait for a signal from the main thread to continue
 		pthread_barrier_wait(&barrier_main_two);
 	}
+
 	return NULL;
 }
 
@@ -534,8 +541,10 @@ void simulation (void) {
 	int timesteps;
 	int ret_thread;
 
-	// Initiate timestep-counter
+	// Initiate timestep-counter and continuation value
 	timesteps = 0;
+	cont = 1;
+
 
 	// initialize file and write first time setup of the system
 	if (create_file(outfile, N, no_writeouts) == EXIT_FAILURE) {
@@ -640,19 +649,22 @@ void simulation (void) {
 		pthread_barrier_wait(&barrier_main_two);
 	}
 
+	// terminate all threads and ask them to join, this way no resources are wasted
+	cont = 0;
+
+	for (int i=0; i<thread_number; i++) {
+		pthread_join(threads[i], NULL);
+	}
+
 	// insert an empty line
 	fprintf(stderr, "\n\n");
-
-	// cancel all other threads, we're done here
-	for (int i=0; i<thread_number; i++) {
-		pthread_cancel(threads[i]);
-	}
 
 	// end of simulation, free all allocated memory space
 	free(position);
 	free(force);
 	free(verlet);
 	free(verlet_distance);
+	free(verlet_max);
 	free(threads);
 	free(borders);
 	free(numbers);
