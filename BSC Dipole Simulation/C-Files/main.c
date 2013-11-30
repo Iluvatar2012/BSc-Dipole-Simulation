@@ -300,9 +300,6 @@ static void *iteration (int *no) {
 
 	double m_j;
 
-	// increase Gamma_A by a factor of 3
-	Gamma_A *= 3;
-
 	if (min%2 == 0){
 		// assign the appropriate shear rate to even and uneven particles
 		box_one = &box_x_A;
@@ -383,7 +380,7 @@ static void *iteration (int *no) {
 
 				// get square of distance and compute force in x and y direction
 				r_squared = dx*dx + dy*dy;
-				temp_force = (m_i_one*m_j/sqrt(r_squared))*(Gamma_A/(r_squared*r_squared)-force_cutoff); // WARNING: this is F/r
+				temp_force = (m_i_one*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff); // WARNING: this is F/r
 
 				force[2*i] 		+= temp_force*dx; // equals F*x/r = F*cos(phi) (x-component)
 				force[2*i+1]	+= temp_force*dy; // equals F*y/r = F*sin(phi) (y-component)
@@ -427,7 +424,7 @@ static void *iteration (int *no) {
 
 				// get square of distance and compute force in x and y direction
 				r_squared = dx*dx + dy*dy;
-				temp_force = (m_i_two*m_j/sqrt(r_squared))*(Gamma_A/(r_squared*r_squared)-force_cutoff); // WARNING: this is F/r
+				temp_force = (m_i_two*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff); // WARNING: this is F/r
 
 				force[2*i] 		+= temp_force*dx; // equals F*x/r = F*cos(phi) (x-component)
 				force[2*i+1]	+= temp_force*dy; // equals F*y/r = F*sin(phi) (y-component)
@@ -590,7 +587,6 @@ void simulation (void) {
 	while (timesteps <= max_timesteps) {
 		// Synchronize all threads
 		pthread_barrier_wait(&barrier_main_one);
-
 
 		// Save maximum displacement of two particles, this determines when to update the Verlet-list
 		for (int i=0; i<2*thread_number; i++) {
