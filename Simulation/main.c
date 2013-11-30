@@ -650,7 +650,7 @@ void simulation (void) {
 				fprintf(stdout, ".");
 			}
 
-			fprintf(stdout, "] \t\tElapsed time: %d s\r", rem_time);
+			fprintf(stdout, "] \t\tElapsed time: %d s\r", (int)(rem_time));
 
 			fflush(stdout);
 		}
