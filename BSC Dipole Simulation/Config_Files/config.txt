@@ -1,0 +1,12 @@
+Number of particles (N)              	: 1000
+Energie (k_B*T)							: 1
+Dipole interaction relation (Gamma_A)  	: 10
+Particle dipole ratio (m)				: 0.24
+Shear rate A (shear_A)               	: 10
+Brownian Diffusion Time (tau_B)       	: 1
+Brownian Diffusion (D_Brown_A)	       	: 1
+Time difference (delta_t)            	: 1e-6
+Destination file (outfile)           	: Results/great_file_name.hdf5
+Iterations                           	: 10
+Number of Threads                    	: 8
+Writeouts                            	: 10

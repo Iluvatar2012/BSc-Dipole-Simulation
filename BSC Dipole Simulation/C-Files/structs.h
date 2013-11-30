@@ -12,7 +12,7 @@
 // define a struct for retrieving parameters from a given file
 struct parameters {
 	// file to be written to
-	char 	outfile[1024];
+	char 	outfile[2048];
 
 	// system properties
 	int 	N;

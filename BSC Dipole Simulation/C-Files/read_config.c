@@ -56,7 +56,7 @@ struct parameters *read_file(char* file) {
 	int check;
 
 	// read input from document, adjust output location and return
-	char temp[1024];
+	char temp[2048];
 
 	if ((check = fscanf(infile, "Number of particles (N)              	: %d\n",  (&(param->N)))) < 1)
 		return NULL;
@@ -84,7 +84,7 @@ struct parameters *read_file(char* file) {
 		return NULL;
 
 	// Concatenate current working directory with filename from config file, close the file stream
-	strncat((param->outfile), temp, 1024-strlen((param->outfile)));
+	strncat((param->outfile), temp, 2048-strlen((param->outfile)));
 	fclose(infile);
 
 	// return to caller
