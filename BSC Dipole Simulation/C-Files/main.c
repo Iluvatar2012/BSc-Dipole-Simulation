@@ -541,6 +541,10 @@ void simulation (void) {
 	int timesteps;
 	int ret_thread;
 
+	time_t 	init_time;
+	time_t 	current_time;
+	time_t 	rem_time;
+
 	// Initiate timestep-counter and continuation value
 	timesteps = 0;
 	cont = 1;
@@ -592,6 +596,9 @@ void simulation (void) {
 	// insert an empty line
 	fprintf(stderr, "\n");
 
+	// save time at iteration start
+	time(&init_time);
+
 	// iterate over all timesteps
 	while (timesteps <= max_timesteps) {
 		// Synchronize all threads
@@ -622,10 +629,15 @@ void simulation (void) {
 		if ((timesteps%no_writeouts) == 0) {
 			write_data(timesteps, position);
 
-			// give a percentage output to user
+			// compute percentage of program already completed
 			perc = (100.*timesteps)/max_timesteps;
 
-			fprintf(stdout, "Progress: \t\t\t[");
+			// compute elapsed program time
+			time(&current_time);
+			rem_time = current_time - init_time;
+
+			// give user a coherent overview
+			fprintf(stdout, "Progress: \t%.1lf%%\t\t\t[", perc);
 
 			for(int i=0; i<floor(perc); i++) {
 				fprintf(stdout, "=");
@@ -638,7 +650,7 @@ void simulation (void) {
 				fprintf(stdout, ".");
 			}
 
-			fprintf(stdout, "] \t\t %.1lf%%\r", perc);
+			fprintf(stdout, "] \t\tElapsed time: %d s\r", rem_time);
 
 			fflush(stdout);
 		}
