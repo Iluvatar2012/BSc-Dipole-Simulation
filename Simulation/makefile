@@ -5,11 +5,14 @@ NAME    := ../simulation
 LIBS    := -lm -lpthread -lhdf5
 CFLAGS  := -c -std=c99 -O3
 
+# set the used compiler, maybe this will change in the future
+CC		:= gcc
+
 # call the gnu C compiler
 all: main.o hdf5.o read.o math.o
 	@echo '--------------------------------------------------------------------------------------------------------------------------------------'
 	@echo 'Invoking: GCC C Linker'
-	gcc -o $(NAME) main.o hdf5.o read.o math.o $(LIBS)
+	$(CC) -o $(NAME) main.o hdf5.o read.o math.o $(LIBS)
 	@echo 'Finished building: '$(NAME)
 	@echo ' '
 
@@ -21,17 +24,17 @@ all: main.o hdf5.o read.o math.o
 main.o:	main.c
 	@echo '--------------------------------------------------------------------------------------------------------------------------------------'
 	@echo 'Invoking: GCC C Compiler'
-	gcc $(CFLAGS) main.c
+	$(CC) $(CFLAGS) main.c
 	@echo ' '
 
 hdf5.o:	hdf5_output.c
-	gcc $(CFLAGS) -o hdf5.o hdf5_output.c
+	$(CC) $(CFLAGS) -o hdf5.o hdf5_output.c
 	@echo ' '
 
 read.o: read_config.c
-	gcc $(CFLAGS) -o read.o read_config.c
+	$(CC) $(CFLAGS) -o read.o read_config.c
 	@echo ' '
 
 math.o:	extendedmath.c
-	gcc $(CFLAGS) -o math.o extendedmath.c
+	$(CC) $(CFLAGS) -o math.o extendedmath.c
 	@echo ' '

@@ -5,10 +5,13 @@ NAME 	:= ../graphic
 LIBS 	:= -lm -lhdf5 -lSDL
 CFLAGS	:= -c -O3 -std=c99
 
+# set current C Compiler, maybe another one shall be used in the future
+CC		:= gcc
+
 all: simulation.o
 	@echo '--------------------------------------------------------------------------------------------------------------------------------------'
 	@echo 'Invoking: GCC C Linker'
-	gcc simulation.o -o $(NAME) $(LIBS)
+	$(CC) simulation.o -o $(NAME) $(LIBS)
 	@echo 'Finished building: '$(NAME)
 	@echo ' '
 
@@ -20,5 +23,5 @@ all: simulation.o
 simulation.o: simulation_gui.c
 	@echo '--------------------------------------------------------------------------------------------------------------------------------------'
 	@echo 'Invoking: GCC C Compiler'
-	gcc $(CFLAGS) -o simulation.o simulation_gui.c
+	$(CC) $(CFLAGS) -o simulation.o simulation_gui.c
 	@echo ' '
