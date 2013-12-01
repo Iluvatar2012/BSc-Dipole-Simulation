@@ -88,9 +88,9 @@ int read_build (char* infile) {
 	}
 
 	// if everthing is in order, iterate over all provided variables and finally write the files
-	for (double m = m_min; m < m_max; m += m_step) {
-		for (double G = G_min; G < G_max; G += G_step) {
-			for (double s = s_min; s < s_max; s += s_step) {
+	for (double m = m_min; m <= m_max; m += m_step) {
+		for (double G = G_min; G <= G_max; G += G_step) {
+			for (double s = s_min; s <= s_max; s += s_step) {
 				// call the file builder
 				check = builder(m, G, s);
 
