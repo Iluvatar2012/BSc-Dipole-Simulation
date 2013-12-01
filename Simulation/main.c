@@ -806,21 +806,15 @@ int main(int argcount, char** argvektor) {
 	/* Read parameters from given file, default is "config.txt", check that input string fits char *infile.
 	 * This way several different simulations with different starting parameters are possible. */
 	char infile[2048];
-	getcwd(infile, sizeof(infile));
-
-	// append "/" since getcwd doesn't include that, but it is needed for good user input
-	strncat(infile, "/", 1);
-	unsigned int length = sizeof(infile) - strlen(infile);
+	unsigned int length = 2048;
 
 	if(argcount == 2) {
 		strncat(infile, argvektor[1], length);
 	} else {
-		strncat(infile,"Config_Files/config.txt", length);		// default
+		strncat(infile,"Config_Files/default", length);		// default
 	}
 
-	// get current working directory, append an "/" and pass arguments to file reader
-	getcwd(outfile, sizeof(outfile));
-	strncat(outfile, "/", 1);
+	// pass arguments to file reader
 	int success_check = read_struct(infile);
 
 	// check whether file could be properly read

@@ -1,5 +1,7 @@
 simulation
 graphic
-config_builder
+builder
 *.hdf5
 Results/
+Config_Files/*
+!Config_Files/default
