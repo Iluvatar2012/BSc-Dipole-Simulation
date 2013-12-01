@@ -120,14 +120,14 @@ int graphicOutput () {
 	}
 
 	// get the picture of the black dot
-	ball_black = SDL_LoadBMP("Black_Dot_3x3px.bmp");
+	ball_black = SDL_LoadBMP("Dots/Black_Dot_3x3px.bmp");
 	if (ball_black == NULL) {
 		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
 		return EXIT_FAILURE;
 	}
 
 	// get the picture of the red dot
-	ball_red = SDL_LoadBMP("Red_Dot_3x3px.bmp");
+	ball_red = SDL_LoadBMP("Dots/Red_Dot_3x3px.bmp");
 	if (ball_red == NULL) {
 		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
 		return EXIT_FAILURE;
