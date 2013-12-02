@@ -71,6 +71,8 @@ struct parameters *read_file(char* file) {
 		return NULL;
 	if ((check = fscanf(infile, "Brownian Diffusion (D_Brown_A)	       	: %lf\n", (&(param->D_Brown_A)))) < 1)
 		return NULL;
+	if ((check = fscanf(infile, "Particle Diffusion ratio (D_rat)		: %lf\n", (&(param->D_rat)))) < 1)
+		return NULL;
 	if ((check = fscanf(infile, "Time difference (delta_t)            	: %lf\n", (&(param->timestep)))) < 1)
 		return NULL;
 	if ((check = fscanf(infile, "Destination file (outfile)           	: %s\n",  temp)) < 1)

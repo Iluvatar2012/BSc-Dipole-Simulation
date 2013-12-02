@@ -98,7 +98,7 @@ int hdf5_read (char* file) {
 int graphicOutput () {
 
 	// create everything we need to show the simulation
-	SDL_Surface	*screen, *ball_black, *ball_red;
+	SDL_Surface	*screen, *ball_even, *ball_uneven;
 	SDL_Rect	dst;
 	SDL_Event	event;
 
@@ -120,25 +120,25 @@ int graphicOutput () {
 	}
 
 	// get the picture of the black dot
-	ball_black = SDL_LoadBMP("Dots/Red_Dot_3x3px.bmp");
-	if (ball_black == NULL) {
+	ball_even = SDL_LoadBMP("Dots/Red_Dot_5x5px.bmp");
+	if (ball_even == NULL) {
 		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
 		return EXIT_FAILURE;
 	}
 
 	// get the picture of the red dot
-	ball_red = SDL_LoadBMP("Dots/Green_Dot_3x3px.bmp");
-	if (ball_red == NULL) {
+	ball_uneven = SDL_LoadBMP("Dots/Green_Dot_3x3px.bmp");
+	if (ball_uneven == NULL) {
 		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
 		return EXIT_FAILURE;
 	}
 
 	// get the height and width of our image, needed to blit it to screen
-	dst.w = ball_black->w;
-	dst.h = ball_black->h;
+	dst.w = ball_even->w;
+	dst.h = ball_even->h;
 
-	dst.w = ball_red->w;
-	dst.h = ball_red->h;
+	dst.w = ball_uneven->w;
+	dst.h = ball_uneven->h;
 
 	// variables for checking various states (terminating, what frame to show and whether a key was pressed)
 	int	done 		= 0;
@@ -159,8 +159,8 @@ int graphicOutput () {
 	int	scrWidth 	= screen->w;
 	int scrHeight 	= screen->h;
 
-	double picWidth		= ball_black->w;
-	double picHeight	= ball_black->h;
+	double picWidth		= ball_even->w;
+	double picHeight	= ball_even->h;
 
 	double posY;
 
@@ -245,9 +245,10 @@ int graphicOutput () {
 
 			// copy image to screen according to whether we need a red or black dot
 			if (i%2 == 0)
-				SDL_BlitSurface(ball_black, NULL, screen, &dst);
+				SDL_BlitSurface(ball_even
+			, NULL, screen, &dst);
 			else
-				SDL_BlitSurface(ball_red, NULL, screen, &dst);
+				SDL_BlitSurface(ball_uneven, NULL, screen, &dst);
 		}
 
 		// flip screen and show other buffer
@@ -258,8 +259,9 @@ int graphicOutput () {
 	}
 
 	// clear memory of everything cluttering it
-	SDL_FreeSurface(ball_black);
-	SDL_FreeSurface(ball_red);
+	SDL_FreeSurface(ball_even
+);
+	SDL_FreeSurface(ball_uneven);
 
 	// return to caller
 	return EXIT_SUCCESS;

@@ -120,6 +120,7 @@ static double shear_A;
 static double shear_B;
 static double D_Brown_A;
 static double D_Brown_B;
+static double D_rat;
 static double tau_B;
 static double weigh_brown_A;
 static double weigh_brown_B;
@@ -176,6 +177,7 @@ int read_struct (char* infile) {
 	shear_A		= param->shear_A;
 	tau_B		= param->tau_B;
 	D_Brown_A 	= param->D_Brown_A;
+	D_rat		= param->D_rat;
 
 	timestep	  	= param->timestep;
 	max_timesteps  	= param->max_timesteps;
@@ -212,7 +214,7 @@ int init(void) {
 	Li 	= 1.0/L;
 
 	// compute diffusion value of particle B, interaction relation and initialize shear rate for particles B
-	D_Brown_B 	= D_Brown_A/cbrt(m);
+	D_Brown_B 	= D_rat*D_Brown_A;
 	shear_B		= 0;
 
 	// set values of remaining static variables

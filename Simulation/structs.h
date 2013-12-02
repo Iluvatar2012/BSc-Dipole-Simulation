@@ -22,6 +22,7 @@ struct parameters {
 	double 	shear_A;
 	double	tau_B;
 	double 	D_Brown_A;
+	double 	D_rat;
 
 	// simulation and computer system properties
 	double 	timestep;
