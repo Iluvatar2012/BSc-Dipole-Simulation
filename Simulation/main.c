@@ -54,6 +54,16 @@
  *
  */
 
+
+
+
+
+
+
+
+
+
+
 /*-------------------------------------------------------------------------------------------------------*/
 #define _GNU_SOURCE
 
@@ -71,6 +81,16 @@
 #include "extendedmath.h"
 #include "structs.h"
 #include "hdf5_output.h"
+
+
+
+
+
+
+
+
+
+
 
 /*-------------------------------------------------------------------------------------------------------*/
 // Basic values of Simulation
@@ -126,6 +146,16 @@ static pthread_barrier_t 	barrier_main_one;
 static pthread_barrier_t 	barrier_main_two;
 static pthread_barrier_t 	barrier_internal;
 
+
+
+
+
+
+
+
+
+
+
 /*-------------------------------------------------------------------------------------------------------*/
 int read_struct (char* infile) {
 
@@ -158,6 +188,16 @@ int read_struct (char* infile) {
 	// return to caller
 	return EXIT_SUCCESS;
 }
+
+
+
+
+
+
+
+
+
+
 
 /*-------------------------------------------------------------------------------------------------------*/
 int init(void) {
@@ -264,6 +304,16 @@ int init(void) {
 	update_verlet();
 	return EXIT_SUCCESS;
 }
+
+
+
+
+
+
+
+
+
+
 
 
 /*-------------------------------------------------------------------------------------------------------*/
@@ -532,6 +582,16 @@ static void *iteration (int *no) {
 }
 
 
+
+
+
+
+
+
+
+
+
+
 /*-------------------------------------------------------------------------------------------------------*/
 void simulation (void) {
 
@@ -684,6 +744,16 @@ void simulation (void) {
 	fprintf(stderr, "exiting simulation\n");
 }
 
+
+
+
+
+
+
+
+
+
+
 /*-------------------------------------------------------------------------------------------------------*/
 void update_verlet (void) {
 	// define necessary variables: i, j and temporary position variables,
@@ -798,6 +868,16 @@ void update_verlet (void) {
 		verlet_max[2*i+1]	= 0;
 	}
 }
+
+
+
+
+
+
+
+
+
+
 
 
 /*-------------------------------------------------------------------------------------------------------*/

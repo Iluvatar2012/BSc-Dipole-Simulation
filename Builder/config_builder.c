@@ -17,6 +17,18 @@ int read_build();
 
 static int N;
 
+
+
+
+
+
+
+
+
+
+
+
+
 /*-------------------------------------------------------------------------------------------------------*/
 /*	Template for config file:
 *	Number of particles (N)              	: 1000
@@ -32,6 +44,17 @@ static int N;
 *	Number of Threads                    	: 8
 *	Writeouts                            	: 1000
 */
+
+
+
+
+
+
+
+
+
+
+
 
 /*-------------------------------------------------------------------------------------------------------*/
 /*	This function reads from a provided builder file and builds the according files, template as follows:
@@ -106,6 +129,17 @@ int read_build (char* infile) {
 	// return to caller
 	return EXIT_SUCCESS;
 }
+
+
+
+
+
+
+
+
+
+
+
 
 /*-------------------------------------------------------------------------------------------------------*/
 // The following function defines a builder for a series of config files with differing parameters
@@ -188,6 +222,20 @@ int builder (double m, double Gamma_A, double shear) {
 	fclose(file);
 	return EXIT_SUCCESS;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /*-------------------------------------------------------------------------------------------------------*/
 int main (int argcount, char** argvector) {
