@@ -6,6 +6,7 @@
 #define 	kT			1.0
 #define 	tau_B 		1.0
 #define 	D_A 		1.0
+#define 	D_rat		1.7
 #define 	dt 			1e-6
 #define 	iter 		1000000
 #define 	threads 	8
@@ -38,8 +39,9 @@ static int N;
 *	Shear rate A (shear_A)               	: 0
 *	Brownian Diffusion Time (tau_B)       	: 1
 *	Brownian Diffusion (D_Brown_A)	       	: 1
+* 	Particle Diffusion ratio (D_rat)		: 1.7
 *	Time difference (delta_t)            	: 1e-6
-*	Destination file (outfile)           	: Results/great_file_name.hdf5
+*	Destination file (outfile)           	: Results/default.hdf5
 *	Iterations                           	: 100000
 *	Number of Threads                    	: 8
 *	Writeouts                            	: 1000
@@ -207,6 +209,8 @@ int builder (double m, double Gamma_A, double shear) {
 		return EXIT_FAILURE;
 	if ((check = fprintf(file, "Brownian Diffusion (D_Brown_A)	    	: %lf\n", D_A)) < 1)
 		return EXIT_FAILURE;
+	if ((check = fprintf(file, "Particle Diffusion ratio (D_rat)		: %lf\n", D_rat)) < 1)
+		return EXIT_FAILURE;
 	if ((check = fprintf(file, "Time difference (delta_t)            	: %lf\n", dt)) < 1)
 		return EXIT_FAILURE;
 	if ((check = fprintf(file, "Destination file (outfile)           	: %s\n",  outfile)) < 1)
@@ -215,7 +219,7 @@ int builder (double m, double Gamma_A, double shear) {
 		return EXIT_FAILURE;
 	if ((check = fprintf(file, "Number of Threads                     	: %d\n",  threads)) < 1)
 		return EXIT_FAILURE;
-	if ((check = fprintf(file, "Writeouts                             	: %d\n",    writes)) < 1)
+	if ((check = fprintf(file, "Writeouts                             	: %d\n",  writes)) < 1)
 		return EXIT_FAILURE;
 
 	// close the filestream and return to caller
