@@ -150,7 +150,7 @@ int graphicOutput () {
 	int	keyPressed 	= 0;
 
 	// the box's length
-	double L 		= sqrt(N);
+	double L 		= sqrt(N/2.);
 
 	// counter to set which timestep we are to draw
 	int counter 	= 0;
@@ -221,6 +221,8 @@ int graphicOutput () {
 			// increase counter, check that we don't exceed the number of steps, reset manipulation variable
 			counter++;
 			counter %= steps;
+//			if (counter == 500)
+//				play = 0;
 			next = 0;
 		}
 		else if (last) {
