@@ -3,12 +3,12 @@
 #include <string.h>
 
 // define variables which will probably not be altered, except for hardcode
+#define 	N 			1000
 #define 	kT			1.0
 #define 	tau_B 		1.0
 #define 	D_A 		1.0
 #define 	D_rat		1.7
 #define 	dt 			1e-6
-#define 	iter 		1000
 #define 	threads 	8
 #define 	writes 		1000
 
@@ -16,7 +16,7 @@
 int builder();
 int read_build();
 
-static int N;
+static int iter;
 
 
 
@@ -61,7 +61,7 @@ static int N;
 /*-------------------------------------------------------------------------------------------------------*/
 /*	This function reads from a provided builder file and builds the according files, template as follows:
 *
-*	N 				1000
+*	iter 			1000000
 *	m 				0.1 		1.0 		0.1
 *	Gamma 			10 			100 		10
 *	shear 			0			1000 		20
@@ -85,7 +85,7 @@ int read_build (char* infile) {
 
 	// read parameters from provided file
 
-	if (check != 0 && (check = fscanf(file, "N 				%d\n", &N)) < 1)
+	if (check != 0 && (check = fscanf(file, "iter 			%d\n", &iter)) < 1)
 		check = 0;
 	if (check != 0 && (check = fscanf(file, "m 				%lf 		%lf 		%lf\n", &m_min, &m_max, &m_step)) < 1)
 		check = 0;
@@ -163,30 +163,22 @@ int builder (double m, double Gamma_A, double shear, int no) {
 
 	// append the number of particles
 	strncat(outfile, "N_", 2);
-	//strncat(config, "N_", 2);
 	sprintf(buf, "%d", N);
-	//strncat(config, buf, 32);
 	strncat(outfile, buf, 32);
 
 	// append the binary relation m
 	strncat(outfile, "__m_", 4);
-	//strncat(config, "__m_", 4);
 	sprintf(buf, "%.3lf", m);
-	//strncat(config, buf, 64);
 	strncat(outfile, buf, 64);
 
 	// append the dipole relation Gamma
 	strncat(outfile, "__GammaA_", 9);
-	//strncat(config, "__GammaA_", 9);
 	sprintf(buf, "%lf", Gamma_A);
-	//strncat(config, buf, 64);
 	strncat(outfile, buf, 64);
 
 	// append the shear rate
 	strncat(outfile, "__shear_", 8);
-	//strncat(config, "__shear_", 8);
 	sprintf(buf, "%lf", shear);
-	//strncat(config, buf, 64);
 	strncat(outfile, buf, 64);
 
 	// append the proper ending
