@@ -208,9 +208,9 @@ int init(void) {
     time(&t);
     srand((unsigned int)t);
 
-	// compute Boxlength from a = sqrt(L²/(PI*N)) = 1, or, more inaccurately, narrow a as side of a box so that: a = sqrt(L²/N) = 1
-//	L = sqrt(PI*N);
-	L 	= sqrt(N);
+	// compute Boxlength from a = sqrt(L²/(PI*N_A)) = 1, or, more inaccurately, narrow a as side of a box so that: a = sqrt(L²/N_A) = 1
+//	L = sqrt(PI*N_A);
+	L 	= sqrt(N/2.);	// N_A = N/2.;
 	Li 	= 1.0/L;
 
 	// compute diffusion value of particle B, interaction relation and initialize shear rate for particles B
@@ -686,6 +686,11 @@ void simulation (void) {
 			verlet_max_1 = 0;
 			verlet_max_2 = 0;
 		}
+
+		// TEMPORARY CHANGES!!
+		/*if (timesteps == 100000) {
+			Gamma_A = 1000;
+		}*/
 
 		// check whether parameters should be written to declared external file
 		if ((timesteps%no_writeouts) == 0) {
