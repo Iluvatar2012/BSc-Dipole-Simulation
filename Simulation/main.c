@@ -136,7 +136,7 @@ static double  d_cutoff_verlet;
 static double  force_cutoff;
 
 // Other miscellaneous system variables, especially for thread handling
-static char 	outfile[2048];
+static char 	outfile[1024];
 static int* 	borders;
 static int* 	numbers;
 static int 		thread_number;
@@ -168,7 +168,7 @@ int read_struct (char* infile) {
 		return EXIT_FAILURE;
 
 	// get all the necessary variables from the struct
-	strncat(outfile, param->outfile, 2048-strlen(outfile));
+	strncpy(outfile, param->outfile, 1024);
 
 	N 			= param->N;
 	kT			= param->kT;
@@ -892,13 +892,13 @@ int main(int argcount, char** argvektor) {
 
 	/* Read parameters from given file, default is "config.txt", check that input string fits char *infile.
 	 * This way several different simulations with different starting parameters are possible. */
-	char infile[2048];
-	unsigned int length = 2048;
+	char infile[1024];
+	unsigned int length = 1024;
 
 	if(argcount == 2) {
-		strncat(infile, argvektor[1], length);
+		strncpy(infile, argvektor[1], length);
 	} else {
-		strncat(infile,"Config_Files/default", length);		// default
+		strncpy(infile,"Config_Files/default", length);		// default
 	}
 
 	// pass arguments to file reader
