@@ -8,7 +8,7 @@
 #define 	D_A 		1.0
 #define 	D_rat		1.7
 #define 	dt 			1e-6
-#define 	iter 		1000000
+#define 	iter 		1000
 #define 	threads 	8
 #define 	writes 		1000
 
@@ -112,12 +112,16 @@ int read_build (char* infile) {
 		return EXIT_FAILURE;
 	}
 
+	// count the number of files we are writing
+	int i = 1;
+
 	// if everthing is in order, iterate over all provided variables and finally write the files
 	for (double m = m_min; m <= m_max; m += m_step) {
 		for (double G = G_min; G <= G_max; G += G_step) {
 			for (double s = s_min; s <= s_max; s += s_step) {
-				// call the file builder
-				check = builder(m, G, s);
+				// call the file builder, increase file counter
+				check = builder(m, G, s, i);
+				i++;
 
 				// check whether function worked properly
 				if (check != EXIT_SUCCESS) {
@@ -146,7 +150,7 @@ int read_build (char* infile) {
 /*-------------------------------------------------------------------------------------------------------*/
 // The following function defines a builder for a series of config files with differing parameters
 
-int builder (double m, double Gamma_A, double shear) {
+int builder (double m, double Gamma_A, double shear, int no) {
 	// construct the filename to which config data will be written
 	char config[1024] = "Config_Files/";
 
@@ -154,32 +158,35 @@ int builder (double m, double Gamma_A, double shear) {
 	char outfile[1024] = "Results/";
 	char buf[64];
 
+	sprintf(buf, "%d", no);
+	strncat(config, buf, 32);
+
 	// append the number of particles
 	strncat(outfile, "N_", 2);
-	strncat(config, "N_", 2);
+	//strncat(config, "N_", 2);
 	sprintf(buf, "%d", N);
-	strncat(config, buf, 32);
+	//strncat(config, buf, 32);
 	strncat(outfile, buf, 32);
 
 	// append the binary relation m
 	strncat(outfile, "__m_", 4);
-	strncat(config, "__m_", 4);
+	//strncat(config, "__m_", 4);
 	sprintf(buf, "%.3lf", m);
-	strncat(config, buf, 64);
+	//strncat(config, buf, 64);
 	strncat(outfile, buf, 64);
 
 	// append the dipole relation Gamma
 	strncat(outfile, "__GammaA_", 9);
-	strncat(config, "__GammaA_", 9);
+	//strncat(config, "__GammaA_", 9);
 	sprintf(buf, "%lf", Gamma_A);
-	strncat(config, buf, 64);
+	//strncat(config, buf, 64);
 	strncat(outfile, buf, 64);
 
 	// append the shear rate
 	strncat(outfile, "__shear_", 8);
-	strncat(config, "__shear_", 8);
+	//strncat(config, "__shear_", 8);
 	sprintf(buf, "%lf", shear);
-	strncat(config, buf, 64);
+	//strncat(config, buf, 64);
 	strncat(outfile, buf, 64);
 
 	// append the proper ending

@@ -170,6 +170,7 @@ int read_struct (char* infile) {
 	// get all the necessary variables from the struct
 	strncpy(outfile, param->outfile, 1024);
 
+
 	N 			= param->N;
 	kT			= param->kT;
 	Gamma_A		= param->Gamma_A;
