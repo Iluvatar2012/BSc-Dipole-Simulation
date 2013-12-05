@@ -678,7 +678,7 @@ void simulation (void) {
 
 		// adjust orientation of upper and lower box row
 		box_x_A += shear_A*L*delta_t;
-		box_x_A  -= floor(box_x_A/L)*L;
+		box_x_A -= floor(box_x_A/L)*L;
 
 		// check if verlet list has to be updated
 		if ((verlet_max_1+verlet_max_2) > d_cutoff_verlet) {
