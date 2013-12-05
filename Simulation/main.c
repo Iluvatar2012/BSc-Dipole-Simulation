@@ -168,7 +168,7 @@ int read_struct (char* infile) {
 		return EXIT_FAILURE;
 
 	// get all the necessary variables from the struct
-	strncat(outfile, param->outfile, 2048-strlen(outfile));
+	strncpy(outfile, param->outfile, 2048);
 
 	N 			= param->N;
 	kT			= param->kT;
@@ -892,8 +892,8 @@ int main(int argcount, char** argvektor) {
 
 	/* Read parameters from given file, default is "config.txt", check that input string fits char *infile.
 	 * This way several different simulations with different starting parameters are possible. */
-	char infile[2048];
-	unsigned int length = 2048;
+	char infile[1024] = "";
+	unsigned int length = 1024;
 
 	if(argcount == 2) {
 		strncat(infile, argvektor[1], length);
