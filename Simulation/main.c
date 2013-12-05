@@ -736,7 +736,7 @@ void simulation (void) {
 	}
 
 	// insert an empty line
-	fprintf(stderr, "\n\n");
+	fprintf(stderr, "\n");
 
 	// end of simulation, free all allocated memory space
 	free(position);
@@ -748,7 +748,10 @@ void simulation (void) {
 	free(borders);
 	free(numbers);
 
-	fprintf(stderr, "exiting simulation\n");
+	// compute runtime, give information to user and leave program
+	time(&current_time);
+	fprintf(stderr, "Finished simulation, Parameters N: %d, Gamma: %.2lf, Shear: %.2lf\n", N, Gamma_A, shear_A);
+	fprintf(stderr, "Elapsed time: %d seconds\n", (int)(current_time - init_time));
 }
 
 

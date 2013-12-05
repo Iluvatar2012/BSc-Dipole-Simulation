@@ -85,7 +85,7 @@ struct parameters *read_file(char* file) {
 		return NULL;
 
 	// Concatenate current working directory with filename from config file, close the file stream
-	strncpy((param->outfile), temp, 1024));
+	strncpy((param->outfile), temp, 1024);
 	fclose(infile);
 
 	// return to caller
