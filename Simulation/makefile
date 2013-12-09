@@ -10,6 +10,7 @@ CC		:= icc
 
 # call the gnu C compiler
 all: main.o hdf5.o read.o math.o
+	@echo ' '
 	@echo '--------------------------------------------------------------------------------------------------------------------------------------'
 	@echo 'Invoking: GCC C Linker'
 	$(CC) -o $(NAME) main.o hdf5.o read.o math.o $(LIBS)
@@ -25,16 +26,12 @@ main.o:	main.c
 	@echo '--------------------------------------------------------------------------------------------------------------------------------------'
 	@echo 'Invoking: GCC C Compiler'
 	$(CC) $(CFLAGS) main.c
-	@echo ' '
 
 hdf5.o:	hdf5_output.c
 	$(CC) $(CFLAGS) -o hdf5.o hdf5_output.c
-	@echo ' '
 
 read.o: read_config.c
 	$(CC) $(CFLAGS) -o read.o read_config.c
-	@echo ' '
 
 math.o:	extendedmath.c
 	$(CC) $(CFLAGS) -o math.o extendedmath.c
-	@echo ' '

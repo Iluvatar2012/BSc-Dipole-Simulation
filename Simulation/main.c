@@ -98,9 +98,9 @@ static double cutoff;
 static double cutoff_squared;
 static double delta_t;
 static double timestep;
-static double box
+static double box;
 static int	  max_timesteps;
-static int 	  no_writeouts;
+static int 	  write_step;
 
 // Particle properties
 static double kT;
@@ -174,7 +174,7 @@ int read_struct (char* infile) {
 	kT			= param->kT;
 	Gamma_A		= param->Gamma_A;
 	m 			= param->m;
-	shear		= param->shear;
+	shear		= param->shear_A;
 	tau_B		= param->tau_B;
 	D_Brown_A 	= param->D_Brown_A;
 	D_rat		= param->D_rat;
@@ -182,7 +182,7 @@ int read_struct (char* infile) {
 	timestep	  	= param->timestep;
 	max_timesteps  	= param->max_timesteps;
 	thread_number  	= param->thread_number;
-	no_writeouts	= param->no_writeouts;
+	write_step		= param->write_step;
 
 	// free the memory space needed
 	free(param);
@@ -598,16 +598,16 @@ void simulation (void) {
 	timesteps = 0;
 	cont = 1;
 
-
 	// initialize file and write first time setup of the system
-	if (create_file(outfile, N, no_writeouts) == EXIT_FAILURE) {
+	if (create_file(outfile, N, max_timesteps/write_step) == EXIT_FAILURE) {
+		
 		// variable for storing the amount of data already written
 		int written;
-		if (reopen_file(position, &no_writeouts, &written) == EXIT_FAILURE)
+		if (reopen_file(position, max_timesteps/write_step, &written) == EXIT_FAILURE)
 			exit(EXIT_FAILURE);
 
 		// iterate what timestep we are at
-		timesteps = max_timesteps/no_writeouts * written;
+		timesteps = write_step * written;
 		fprintf(stderr, "Timestep: %d\n", timesteps);
 	}
 	else {
@@ -617,7 +617,6 @@ void simulation (void) {
 
 	// increase timestep counter and compute write-out interval
 	timesteps ++;
-	no_writeouts = max_timesteps / no_writeouts;
 
 	// compute borders of all threads
 	for(int i=0; i<(thread_number); i++) {
@@ -680,7 +679,7 @@ void simulation (void) {
 		}*/
 
 		// check whether parameters should be written to declared external file
-		if ((timesteps%no_writeouts) == 0) {
+		if ((timesteps%write_step) == 0) {
 			write_data(timesteps, position);
 
 			// compute percentage of program already completed

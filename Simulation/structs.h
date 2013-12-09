@@ -28,7 +28,7 @@ struct parameters {
 	double 	timestep;
 	int		max_timesteps;
 	int		thread_number;
-	int		no_writeouts;
+	int		write_step;
 };
 /*-------------------------------------------------------------------------------------------------------*/
 

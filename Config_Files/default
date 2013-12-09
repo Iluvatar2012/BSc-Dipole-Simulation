@@ -8,6 +8,6 @@ Brownian Diffusion (D_Brown_A)	       	: 1
 Particle Diffusion ratio (D_rat)		: 1.7
 Time difference (delta_t)            	: 1e-6
 Destination file (outfile)           	: Results/default.hdf5
-Iterations                           	: 10000
+Iterations                           	: 200
 Number of Threads                    	: 8
-Writeouts                            	: 1000
+Writeout step                          	: 10

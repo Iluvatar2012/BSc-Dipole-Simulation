@@ -220,16 +220,15 @@ int graphicOutput () {
 		if (next || play) {
 			// increase counter, check that we don't exceed the number of steps, reset manipulation variable
 			counter++;
-			counter %= steps;
-//			if (counter == 500)
-//				play = 0;
+			counter %= (steps + 1);
+
 			next = 0;
 		}
 		else if (last) {
 			// decrease counter, check that we don't exceed the number of steps, reset manipulation variable
 			counter--;
-			counter += steps;
-			counter %= steps;
+			counter += (steps + 1);
+			counter %= (steps + 1);
 			last = 0;
 		}
 
@@ -275,10 +274,9 @@ int main (int argcount, char** argvektor) {
 
 	// Read user defined binary file from stdin
 	char infile[1024];
-	unsigned int length = sizeof(infile) - strlen(infile);
 
 	if(argcount == 2) {
-		strncat(infile, argvektor[1], length);
+		strncpy(infile, argvektor[1], 1024);
 	} else {
 		fprintf(stderr, "Please provide a binary file to be read! Function will now exit. \n");
 		return EXIT_FAILURE;

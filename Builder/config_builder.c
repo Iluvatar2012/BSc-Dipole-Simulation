@@ -218,7 +218,7 @@ int builder (double m, double Gamma_A, double shear, int no) {
 		return EXIT_FAILURE;
 	if ((check = fprintf(file, "Number of Threads                     	: %d\n",  threads)) < 1)
 		return EXIT_FAILURE;
-	if ((check = fprintf(file, "Writeouts                             	: %d\n",  writes)) < 1)
+	if ((check = fprintf(file, "Writeout step                          	: %d\n",  writes)) < 1)
 		return EXIT_FAILURE;
 
 	// close the filestream and return to caller
