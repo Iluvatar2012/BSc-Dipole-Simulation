@@ -10,7 +10,7 @@
 #define 	D_rat		1.7
 #define 	dt 			1e-6
 #define 	threads 	8
-#define 	writes 		1000
+#define 	writestep	1000
 
 // function declaration and static variables
 int builder();
@@ -44,7 +44,7 @@ static int iter;
 *	Destination file (outfile)           	: Results/default.hdf5
 *	Iterations                           	: 100000
 *	Number of Threads                    	: 8
-*	Writeouts                            	: 1000
+*	Writeout step                          	: 1000
 */
 
 
@@ -218,7 +218,7 @@ int builder (double m, double Gamma_A, double shear, int no) {
 		return EXIT_FAILURE;
 	if ((check = fprintf(file, "Number of Threads                     	: %d\n",  threads)) < 1)
 		return EXIT_FAILURE;
-	if ((check = fprintf(file, "Writeout step                          	: %d\n",  writes)) < 1)
+	if ((check = fprintf(file, "Writeout step                          	: %d\n",  writestep)) < 1)
 		return EXIT_FAILURE;
 
 	// close the filestream and return to caller
