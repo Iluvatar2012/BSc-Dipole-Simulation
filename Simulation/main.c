@@ -98,8 +98,7 @@ static double cutoff;
 static double cutoff_squared;
 static double delta_t;
 static double timestep;
-static double box_x_A;
-static double box_x_B;
+static double box
 static int	  max_timesteps;
 static int 	  no_writeouts;
 
@@ -116,7 +115,7 @@ static double* position;
 static int 	  N;
 static double L;
 static double Li;
-static double shear_A;
+static double shear;
 static double shear_B;
 static double D_Brown_A;
 static double D_Brown_B;
@@ -175,7 +174,7 @@ int read_struct (char* infile) {
 	kT			= param->kT;
 	Gamma_A		= param->Gamma_A;
 	m 			= param->m;
-	shear_A		= param->shear_A;
+	shear		= param->shear;
 	tau_B		= param->tau_B;
 	D_Brown_A 	= param->D_Brown_A;
 	D_rat		= param->D_rat;
@@ -224,8 +223,7 @@ int init(void) {
 	weigh_brown_A 		= sqrt(2.0 * D_Brown_A * delta_t);
 	weigh_brown_B 		= sqrt(2.0 * D_Brown_B * delta_t);
 
-	box_x_A				= 0;
-	box_x_B				= 0;
+	box 				= 0;
 
 	cutoff 				= (L/2.0);
 	cutoff_squared 		= cutoff*cutoff;
@@ -337,10 +335,6 @@ static void *iteration (int *no) {
 	int iterate;
 	int j;
 
-	// define new variables, which will ensure that even numbered particles are of type A and uneven of type B
-	double* box_one;
-	double* box_two;
-
 	double m_i_one;
 	double m_i_two;
 
@@ -356,10 +350,6 @@ static void *iteration (int *no) {
 	double m_j;
 
 	if (min%2 == 0){
-		// assign the appropriate shear rate to even and uneven particles
-		box_one = &box_x_A;
-		box_two = &box_x_B;
-
 		// get the relation of all even values, this is basically the interaction relation this particle will have with other particles
 		m_i_one = 1.0;
 		m_i_two = m;
@@ -372,14 +362,10 @@ static void *iteration (int *no) {
 		D_kT_two = D_Brown_B/kT;
 
 		// set shear value according to particle index
-		shear_one = shear_A * kT/D_Brown_A;
-		shear_two = 0;
+		shear_one = shear * kT/D_Brown_A;
+		shear_two = shear * kT/D_Brown_B;
 	}
 	else {
-		// assign the appropriate shear rate to even and uneven particles
-		box_one = &box_x_B;
-		box_two = &box_x_A;
-
 		// get the relation of all even values, this is basically the interaction relation this particle will have with other particles
 		m_i_one = m;
 		m_i_two = 1.0;
@@ -392,8 +378,8 @@ static void *iteration (int *no) {
 		D_kT_two = D_Brown_A/kT;
 
 		// set shear value according to particle index
-		shear_one = 0;
-		shear_two = shear_A * kT/D_Brown_A;
+		shear_one = shear * kT/D_Brown_B;
+		shear_two = shear * kT/D_Brown_A;
 	}
 
 	// let the simulation run until the thread is terminated
@@ -427,7 +413,7 @@ static void *iteration (int *no) {
 
 				// alter dx, this accounts for Lees-Edwards conditions
 				sig_y 	= dround(dy*Li);
-				dx 		+= sig_y * (*box_one);
+				dx 		+= sig_y * (box);
 
 				// find images through altering dx and dy
 				dx -= dround(dx*Li)*L;
@@ -471,7 +457,7 @@ static void *iteration (int *no) {
 
 				// alter dx, this accounts for Lees-Edwards conditions
 				sig_y 	= dround(dy*Li);
-				dx 		+= sig_y * (*box_two);
+				dx 		+= sig_y * (box);
 
 				// find images through altering dx and dy
 				dx -= dround(dx*Li)*L;
@@ -528,7 +514,7 @@ static void *iteration (int *no) {
 
 			// Calculate x positions with periodic boundary conditions, check whether the particle moved from one row to another
 			position[2*i] 	-= floor(position[2*i]/L)*L;
-			position[2*i]	-= (floor((position[2*i+1]+L)/L)-1)*(*box_one);
+			position[2*i]	-= (floor((position[2*i+1]+L)/L)-1)*(box);
 
 			// Calculate y positions with periodic boundary conditions
 			position[2*i+1] -= floor(position[2*i+1]/L)*L;
@@ -569,7 +555,7 @@ static void *iteration (int *no) {
 
 			// Calculate x positions with periodic boundary conditions, check whether the particle moved from one row to another
 			position[2*i] 	-= floor(position[2*i]/L)*L;
-			position[2*i]	-= (floor((position[2*i+1]+L)/L)-1)*(*box_two);
+			position[2*i]	-= (floor((position[2*i+1]+L)/L)-1)*(box);
 
 			// Calculate y positions with periodic boundary conditions
 			position[2*i+1] -= floor(position[2*i+1]/L)*L;
@@ -678,8 +664,8 @@ void simulation (void) {
 		}
 
 		// adjust orientation of upper and lower box row
-		box_x_A += shear_A*L*delta_t;
-		box_x_A -= floor(box_x_A/L)*L;
+		box += shear*L*delta_t;
+		box -= floor(box/L)*L;
 
 		// check if verlet list has to be updated
 		if ((verlet_max_1+verlet_max_2) > d_cutoff_verlet) {
@@ -751,7 +737,7 @@ void simulation (void) {
 
 	// compute runtime, give information to user and leave program
 	time(&current_time);
-	fprintf(stderr, "Finished simulation, Parameters N: %d, Gamma: %.2lf, Shear: %.2lf\n", N, Gamma_A, shear_A);
+	fprintf(stderr, "Finished simulation, Parameters N: %d, Gamma: %.2lf, Shear: %.2lf\n", N, Gamma_A, shear);
 	fprintf(stderr, "Elapsed time: %d seconds\n", (int)(current_time - init_time));
 }
 
@@ -771,7 +757,6 @@ void update_verlet (void) {
 	double xi, yi, xj, yj;
 	double dx, dy, sig_y;
 	double r_squared;
-	double box_x;
 
 	// count how many values there are in the list
 	int k;
@@ -789,19 +774,13 @@ void update_verlet (void) {
 			xj = position[2*j];
 			yj = position[2*j+1];
 
-			// check whether the particle is of type A or B
-			if (j%2 == 0)
-				box_x = box_x_A;
-			else
-				box_x = box_x_B;
-
 			// get the distance between both particles
 			dx = xi - xj;
 			dy = yi - yj;
 
 			// alter dx, this accounts for Lees-Edwards conditions
 			sig_y 	= dround(dy*Li);
-			dx 		+= sig_y * box_x;
+			dx 		+= sig_y * box;
 
 			// find images through altering dx and dy
 			dx -= dround(dx*Li)*L;
@@ -831,19 +810,13 @@ void update_verlet (void) {
 			xj = position[2*j];
 			yj = position[2*j+1];
 
-			// check whether the particle is of type A or B
-			if (j%2 == 0)
-				box_x = box_x_A;
-			else
-				box_x = box_x_B;
-
 			// get the distance between both particles
 			dx = xi - xj;
 			dy = yi - yj;
 
 			// alter dx, this accounts for Lees-Edwards conditions
 			sig_y 	= dround(dy*Li);
-			dx 		+= sig_y * box_x;
+			dx 		+= sig_y * box;
 
 			// find images through altering dx and dy
 			dx -= dround(dx*Li)*L;
