@@ -200,7 +200,7 @@ int reopen_file(double* position, int writeouts, int* count_written) {
 
 	// check whether the file has been fully written, terminate if it has completed
 	if (counter == writeouts) {
-		fprintf(stderr, "File is complete, program will terminate. \n");
+		fprintf(stderr, "Simulation is complete, program will terminate. \n");
 
 		status = H5Aclose(attr_id_one);
 		status = H5Aclose(attr_id_two);
