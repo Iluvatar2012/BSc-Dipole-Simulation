@@ -1,11 +1,3 @@
-/*
- * simulation_gui.c
- *
- *  Created on: 	April 16, 2013
- *  Last Changed:	July 26, 2013
- *  Author: 		Aiko Bernehed
- */
-
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -22,6 +14,7 @@
 static int 		N;
 static int 		steps;
 static double* 	positions;
+
 
 /*----------------------------------------------------------------------------------------------------------------------------*/
 int hdf5_read (char* file) {
@@ -92,9 +85,9 @@ int hdf5_read (char* file) {
 	return EXIT_SUCCESS;
 }
 
+
 /*----------------------------------------------------------------------------------------------------------------------------*/
-// TODO: write function description
-int graphicOutput () {
+int graphicOutput (char* file, char* read) {
 
 	// create everything we need to show the simulation
 	SDL_Surface	*screen, *ball_even, *ball_uneven;
@@ -139,20 +132,11 @@ int graphicOutput () {
 	dst.w = ball_uneven->w;
 	dst.h = ball_uneven->h;
 
-	// variables for checking various states (terminating, what frame to show and whether a key was pressed)
-	int	done 		= 0;
-
-	int	play 		= 0;
-	int next 		= 0;
-	int last 		= 0;
-
-	int	keyPressed 	= 0;
+	// variable for storing the step that is shall be drawn
+	int step;
 
 	// the box's length
 	double L 		= sqrt(N/2.);
-
-	// counter to set which timestep we are to draw
-	int counter 	= 0;
 
 	// variables to hold basic values for computing absolute pixel positions
 	int	scrWidth 	= screen->w;
@@ -163,102 +147,32 @@ int graphicOutput () {
 
 	double posY;
 
-	// this will later hold our input from keyboard
-	Uint8	*keys;
+	// check which step is supposed to be drawn
+	if (strcmp(read, "first") == 0) 
+		step = 0;
+	else if (strcmp(read, "last") == 0)
+		step = steps;
+	else
+		step = atoi(read);
 
-	// the entire video loop, will run until user terminates the program
-	while (!done) {
-		// Event loop, this will check whether any event is registered
-		while (SDL_PollEvent(&event)) {
-			// check what event has happened
-			switch (event.type) {
-			// terminate the program
-			case SDL_QUIT:
-				done = 1;
-				break;
+	// finally draw the current frame
+	for (int i=0; i<N; i++) {
+		// invert the y axis, otherwise (0,0) would be in the top left corner
+		posY = -positions[step*2*N+2*i+1]+L;
 
-			// user input, get the current keyboard state
-			case SDL_KEYDOWN:
-				keys = SDL_GetKeyState(NULL);
-				keyPressed = 1;
-				break;
-			}
-		}
+		// compute x and y position of each dot
+		dst.x = round((positions[step*2*N+2*i]/L)  *scrWidth -picWidth/2.);
+		dst.y = round((posY/L)*scrHeight-picHeight/2.);
 
-		// if a key was pressed, check user input
-		if (keyPressed) {
-			// reset variable
-			keyPressed = 0;
-
-			// invert varibale to play all frames
-			if (keys[SDLK_SPACE]) {
-				if (play)
-					play = 0;
-				else
-					play = 1;
-				// reset key variable
-				keys[SDLK_SPACE] = 0;
-			}
-
-			// check whether we are supposed to show the next frame
-			if (keys[SDLK_RIGHT]) {
-				next = 1;
-				// reset key variable
-				keys [SDLK_RIGHT] = 0;
-			}
-
-			// check whether we are supposed to show the last frame
-			if (keys[SDLK_LEFT] && !play) {
-				last = 1;
-				// reset key variable
-				keys[SDLK_LEFT] = 0;
-			}
-		}
-
-		// set counter to next or last frame
-		if (next || play) {
-			// increase counter, check that we don't exceed the number of steps, reset manipulation variable
-			counter++;
-			counter %= (steps + 1);
-
-			next = 0;
-		}
-		else if (last) {
-			// decrease counter, check that we don't exceed the number of steps, reset manipulation variable
-			counter--;
-			counter += (steps + 1);
-			counter %= (steps + 1);
-			last = 0;
-		}
-
-		// Reset the screen
-		SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 255, 255, 255));
-
-		// finally draw the current frame
-		for (int i=0; i<N; i++) {
-			// invert the y axis, otherwise (0,0) would be in the top left corner
-			posY = -positions[counter*2*N+2*i+1]+L;
-
-			// compute x and y position of each dot
-			dst.x = round((positions[counter*2*N+2*i]/L)  *scrWidth -picWidth/2.);
-			dst.y = round((posY/L)*scrHeight-picHeight/2.);
-
-			// copy image to screen according to whether we need a red or black dot
-			if (i%2 == 0)
-				SDL_BlitSurface(ball_even, NULL, screen, &dst);
-			else
-				SDL_BlitSurface(ball_uneven, NULL, screen, &dst);
-		}
-
-		// flip screen and show other buffer
-		SDL_Flip(screen);
-
-		// add a delay of 40 ms, equals 25 fps
-		SDL_Delay(40);
+		// copy image to screen according to whether we need a red or black dot
+		if (i%2 == 0)
+			SDL_BlitSurface(ball_even, NULL, screen, &dst);
+		else
+			SDL_BlitSurface(ball_uneven, NULL, screen, &dst);
 	}
 
 	// TRIAL: Save the last screen to file
-	SDL_SaveBMP(screen, "test.bmp");
+	SDL_SaveBMP(screen, file);
 
 	// clear memory of everything cluttering it
 	SDL_FreeSurface(ball_even);
@@ -268,28 +182,50 @@ int graphicOutput () {
 	return EXIT_SUCCESS;
 }
 
+
 /*----------------------------------------------------------------------------------------------------------------------------*/
-// TODO: write function description
 int main (int argcount, char** argvektor) {
 
-	// Read user defined binary file from stdin
-	char infile[1024];
+	char 	file[1024];
+	char	temp[1024];
+	char 	step[8];
+	char* 	ptr;
 
-	if(argcount == 2) {
-		strncpy(infile, argvektor[1], 1024);
+	// read user defined hdf5 file from stdin
+	if(argcount == 3) {
+		strncpy(file, argvektor[1], 1023);
+		strncpy(step, argvektor[2], 8);
 	} else {
-		fprintf(stderr, "Please provide a binary file to be read! Function will now exit. \n");
+		fprintf(stderr, "Please provide an HDF5 file to be read and the timestep ('first', 'last' or number) to be read. \n");
 		return EXIT_FAILURE;
 	}
 
 	// Read file, needed for parameters for graphic output
-	int check = hdf5_read(infile);
+	int check = hdf5_read(file);
 	if (check != EXIT_SUCCESS) {
 		return EXIT_FAILURE;
 	}
 
+	// compute the name of the output file, separate the last part of the string
+	ptr = strrchr(file,  '/');
+
+	if (ptr != NULL)
+		strncpy(temp, ptr+1, 1023);
+	else
+		strncpy(temp, file, 1023);
+
+	// remove the last part containing the file extension
+	ptr 	= strrchr(temp, '.');
+	*ptr 	= '\0';
+
+	strncat(temp, ".bmp", 4);
+
+	// add the appropriate directory to outfile path
+	strncpy(file, "Pictures/\0", 10);
+	strncat(file, temp, 1013);
+	
 	// compute graphic output
-	check = graphicOutput();
+	check = graphicOutput(file, step);
 	if (check != EXIT_SUCCESS) {
 		return EXIT_FAILURE;
 	}

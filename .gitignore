@@ -1,8 +1,12 @@
 simulation
 graphic
 builder
+picture
 *.hdf5
 Results/
+Pictures/*
+!Pictures/makefile
+!Pictures/picturemaker.c
 Config_Files/*
 !Config_Files/default
 Test/

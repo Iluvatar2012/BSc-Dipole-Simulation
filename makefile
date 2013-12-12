@@ -15,3 +15,10 @@ all:
 	@echo ' '
 	@echo ' '
 	$(MAKE) -C Builder/ all
+
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	$(MAKE) -C Pictures/ all	
