@@ -18,8 +18,6 @@
 
 #include <hdf5.h>
 
-// TRIAL: include header for saving image
-#include "savepng.h"
 
 #define PI 			3.14159265358979323846264338328
 
@@ -263,7 +261,7 @@ int graphicOutput () {
 	}
 
 	// TRIAL: Save the last screen to file
-	SDL_SavePNG(screen, "test.png");
+	SDL_SaveBMP(screen, "test.bmp");
 
 	// clear memory of everything cluttering it
 	SDL_FreeSurface(ball_even
