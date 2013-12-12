@@ -10,4 +10,4 @@ Time difference (delta_t)            	: 1e-6
 Destination file (outfile)           	: Results/default.hdf5
 Iterations                           	: 1000000
 Number of Threads                    	: 8
-Writeouts                            	: 1000
+Writeout step                          	: 10
