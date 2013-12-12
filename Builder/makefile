@@ -5,7 +5,7 @@ NAME    := ../builder
 CFLAGS  := -c -std=c99 -O3
 
 # set the used compiler, maybe this will change in the future
-CC		:= icc
+CC		:= gcc
 
 all:	main.o
 	@echo '--------------------------------------------------------------------------------------------------------------------------------------'

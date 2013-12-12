@@ -5,3 +5,4 @@ builder
 Results/
 Config_Files/*
 !Config_Files/default
+Test/
