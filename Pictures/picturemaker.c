@@ -147,6 +147,8 @@ int graphicOutput (char* file, char* read) {
 
 	double posY;
 
+	char buf[16];
+
 	// check which step is supposed to be drawn
 	if (strcmp(read, "first") == 0) 
 		step = 0;
@@ -154,6 +156,12 @@ int graphicOutput (char* file, char* read) {
 		step = steps;
 	else
 		step = atoi(read);
+
+	// add the step drawn and file extension to the filename
+	strncat(file, "__write_", 8);
+	sprintf(buf, "%d", step);
+	strncat(file, buf, 16);
+	strncat(file, ".bmp", 4);
 
 	// finally draw the current frame
 	for (int i=0; i<N; i++) {
@@ -217,8 +225,6 @@ int main (int argcount, char** argvektor) {
 	// remove the last part containing the file extension
 	ptr 	= strrchr(temp, '.');
 	*ptr 	= '\0';
-
-	strncat(temp, ".bmp", 4);
 
 	// add the appropriate directory to outfile path
 	strncpy(file, "Pictures/\0", 10);
