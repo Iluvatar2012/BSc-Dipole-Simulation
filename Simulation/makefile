@@ -6,7 +6,7 @@ LIBS    := -lm -lpthread -lhdf5
 CFLAGS  := -c -std=c99 -O3
 
 # set the used compiler, maybe this will change in the future
-CC		:= gcc
+CC		:= icc
 
 # call the gnu C compiler
 all: main.o hdf5.o read.o math.o
