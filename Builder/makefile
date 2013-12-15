@@ -1,12 +1,6 @@
 # name the resulting program
 NAME    := ../builder
 
-# include the necessary libraries and determine basic parameters
-CFLAGS  := -c -std=c99 -O3
-
-# set the used compiler, maybe this will change in the future
-CC		:= icc
-
 all:	main.o
 	@echo '--------------------------------------------------------------------------------------------------------------------------------------'
 	@echo 'Invoking: GCC C Linker'

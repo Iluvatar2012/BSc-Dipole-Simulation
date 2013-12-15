@@ -1,12 +1,8 @@
 # define output name
 NAME 	:= ../graphic
 
-# define necessary libraries and basic parameters
+# define necessary libraries
 LIBS 	:= -lm -lhdf5 -lSDL
-CFLAGS	:= -c -O3 -std=c99
-
-# set current C Compiler, maybe another one shall be used in the future
-CC		:= icc
 
 all: simulation.o
 	@echo '--------------------------------------------------------------------------------------------------------------------------------------'
