@@ -594,6 +594,8 @@ void simulation (void) {
 	time_t 	current_time;
 	time_t 	rem_time;
 
+	char*	time_string;
+
 	// Initiate timestep-counter and continuation value
 	timesteps = 0;
 	cont = 1;
@@ -615,7 +617,7 @@ void simulation (void) {
 		write_data(timesteps, position);
 	}
 
-	// increase timestep counter and compute write-out interval
+	// increase timestep counter
 	timesteps ++;
 
 	// compute borders of all threads
@@ -636,16 +638,16 @@ void simulation (void) {
 
 		if (ret_thread != 0) {
 			fprintf(stderr, "Thread %d could not be created. \n", i);
-		} else {
-			fprintf(stderr, "Thread %d initialized...\n", i);
+			exit(EXIT_FAILURE);
 		}
 	}
 
-	// insert an empty line
-	fprintf(stderr, "\n");
-
-	// save time at iteration start
+	// save time at iteration start and output simulation start to user
 	time(&init_time);
+	time_string = ctime(&init_time);
+
+	fprintf(stdout, "Starting simulation at %s"
+					"Parameters N: %d, m: %.2lf, Gamma: %.0lf, Shear: %.0lf, Steps: %d\n\n", time_string, N, m, Gamma_A, shear, max_timesteps);
 
 	// iterate over all timesteps
 	while (timesteps <= max_timesteps) {
@@ -672,11 +674,6 @@ void simulation (void) {
 			verlet_max_1 = 0;
 			verlet_max_2 = 0;
 		}
-
-		// TEMPORARY CHANGES!!
-		/*if (timesteps == 100000) {
-			Gamma_A = 1000;
-		}*/
 
 		// check whether parameters should be written to declared external file
 		if ((timesteps%write_step) == 0) {
@@ -736,8 +733,12 @@ void simulation (void) {
 
 	// compute runtime, give information to user and leave program
 	time(&current_time);
-	fprintf(stderr, "Finished simulation, Parameters N: %d, Gamma: %.2lf, Shear: %.2lf\n", N, Gamma_A, shear);
-	fprintf(stderr, "Elapsed time: %d seconds\n", (int)(current_time - init_time));
+	time_string = ctime(&current_time);
+
+	fprintf(stdout, "\nFinished simulation at %s"
+					"Parameters N: %d, m: %.2lf, Gamma: %.0lf, Shear: %.0lf, Steps: %d\n"
+					"Elapsed time: %d seconds\n", time_string, N, m, Gamma_A, shear, max_timesteps, (int)(current_time - init_time));
+	fflush(stdout);
 }
 
 
