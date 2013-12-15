@@ -690,7 +690,7 @@ void simulation (void) {
 			rem_time = current_time - init_time;
 
 			// give user a coherent overview
-			fprintf(stdout, "Progress: \t%.1lf%%\t\t\t[", perc);
+			fprintf(stdout, "Progress: \t\t\t[");
 
 			for(int i=0; i<floor(perc); i++) {
 				fprintf(stdout, "=");
@@ -703,7 +703,7 @@ void simulation (void) {
 				fprintf(stdout, ".");
 			}
 
-			fprintf(stdout, "] \t\tElapsed time: %d s\r", (int)(rem_time));
+			fprintf(stdout, "] \t%.1lf%%\t\telapsed time: %d s\r", perc, (int)(rem_time));
 
 			fflush(stdout);
 		}

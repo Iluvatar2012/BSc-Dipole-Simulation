@@ -2,7 +2,7 @@
 
 STEP=last
 
-for F in Results/N*
+for F in Results/steps_3000000/N*
 
 do
 	echo "Processing $F"
