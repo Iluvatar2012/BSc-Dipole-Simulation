@@ -15,19 +15,14 @@ struct parameters {
 	char 	outfile[2048];
 
 	// system properties
-	int 	N;
-	double	kT;
 	double 	Gamma_A;
 	double 	m;
 	double 	shear_A;
-	double	tau_B;
-	double 	D_Brown_A;
 	double 	D_rat;
 
 	// simulation and computer system properties
 	double 	timestep;
 	int		max_timesteps;
-	int		thread_number;
 	int		write_step;
 };
 /*-------------------------------------------------------------------------------------------------------*/

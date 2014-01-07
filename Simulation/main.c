@@ -169,20 +169,22 @@ int read_struct (char* infile) {
 	// get all the necessary variables from the struct
 	strncpy(outfile, param->outfile, 1024);
 
-
-	N 			= param->N;
-	kT			= param->kT;
 	Gamma_A		= param->Gamma_A;
 	m 			= param->m;
 	shear		= param->shear_A;
-	tau_B		= param->tau_B;
-	D_Brown_A 	= param->D_Brown_A;
 	D_rat		= param->D_rat;
 
 	timestep	  	= param->timestep;
 	max_timesteps  	= param->max_timesteps;
-	thread_number  	= param->thread_number;
 	write_step		= param->write_step;
+
+	// set the rest of the variables
+	N 			= 1000;
+	kT 			= 1.0;
+	tau_B 		= 1.0;
+	D_Brown_A 	= 1.0;
+
+	thread_number 	= 8;
 
 	// free the memory space needed
 	free(param);

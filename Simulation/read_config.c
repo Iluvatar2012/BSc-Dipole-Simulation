@@ -27,16 +27,12 @@
 /*-------------------------------------------------------------------------------------------------------*/
 /* Template for config file:
 *	Number of particles (N)              	: 1000
-*	Energie (k_B*T)							: 1
 *	Dipole interaction relation (Gamma_A)  	: 10
-*	Particle dipole ratio (m)				: 0.24
+*	Particle dipole ratio (m)				: 0.1
 *	Shear rate A (shear_A)               	: 10
-*	Brownian Diffusion Time (tau_B)       	: 1
-*	Brownian Diffusion (D_Brown_A)	       	: 1
 *	Time difference (delta_t)            	: 1e-6
 *	Destination file (outfile)           	: Results/great_file_name.hdf5
 *	Iterations                           	: 100000
-*	Number of Threads                    	: 8
 *	Writeouts                            	: 1000
  *
  * */
@@ -57,19 +53,11 @@ struct parameters *read_file(char* file) {
 	// read input from document, adjust output location and return
 	char temp[1024];
 
-	if ((check = fscanf(infile, "Number of particles (N)              	: %d\n",  (&(param->N)))) < 1)
-		return NULL;
-	if ((check = fscanf(infile, "Energie (k_B*T)				      	: %lf\n", (&(param->kT)))) < 1)
-		return NULL;
 	if ((check = fscanf(infile, "Dipole interaction relation (Gamma_A)	: %lf\n", (&(param->Gamma_A)))) < 1)
 		return NULL;
 	if ((check = fscanf(infile, "Particle dipole ratio (m)				: %lf\n", (&(param->m)))) < 1)
 		return NULL;
 	if ((check = fscanf(infile, "Shear rate A (shear_A)               	: %lf\n", (&(param->shear_A)))) < 1)
-		return NULL;
-	if ((check = fscanf(infile, "Brownian Diffusion Time (tau_B)       	: %lf\n", (&(param->tau_B)))) < 1)
-		return NULL;
-	if ((check = fscanf(infile, "Brownian Diffusion (D_Brown_A)	       	: %lf\n", (&(param->D_Brown_A)))) < 1)
 		return NULL;
 	if ((check = fscanf(infile, "Particle Diffusion ratio (D_rat)		: %lf\n", (&(param->D_rat)))) < 1)
 		return NULL;
@@ -78,8 +66,6 @@ struct parameters *read_file(char* file) {
 	if ((check = fscanf(infile, "Destination file (outfile)           	: %s\n",  temp)) < 1)
 		return NULL;
 	if ((check = fscanf(infile, "Iterations                           	: %d\n",  (&(param->max_timesteps)))) < 1)
-		return NULL;
-	if ((check = fscanf(infile, "Number of Threads                      : %d\n",  (&(param->thread_number)))) < 1)
 		return NULL;
 	if ((check = fscanf(infile, "Writeout step                          : %d",    (&(param->write_step)))) < 1)
 		return NULL;

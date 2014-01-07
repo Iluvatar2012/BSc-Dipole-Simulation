@@ -3,13 +3,8 @@
 #include <string.h>
 
 // define variables which will probably not be altered, except for hardcode
-#define 	N 			1000
-#define 	kT			1.0
-#define 	tau_B 		1.0
-#define 	D_A 		1.0
 #define 	D_rat		1.7
 #define 	dt 			1e-6
-#define 	threads 	8
 #define 	writestep	1000
 
 // function declaration and static variables
@@ -97,7 +92,7 @@ int read_build (char* infile) {
 	// check whether all reads were successful
 	if (check < 1) {
 		fprintf(stderr, "Variables could not be correctly read from file \"%s,\" program will now terminate. \n", infile);
-		fprintf(stderr, "%d, %lf, %lf, %lf\n", N, G_min, G_max, G_step);
+		fprintf(stderr, "%lf, %lf, %lf\n", G_min, G_max, G_step);
 		return EXIT_FAILURE;
 	}
 
@@ -161,13 +156,8 @@ int builder (double m, double Gamma_A, double shear, int no) {
 	sprintf(buf, "%d", no);
 	strncat(config, buf, 32);
 
-	// append the number of particles
-	strncat(outfile, "N_", 2);
-	sprintf(buf, "%d", N);
-	strncat(outfile, buf, 32);
-
 	// append the binary relation m
-	strncat(outfile, "__m_", 4);
+	strncat(outfile, "m_", 4);
 	sprintf(buf, "%1.2lf", m);
 	strncat(outfile, buf, 64);
 
@@ -194,19 +184,11 @@ int builder (double m, double Gamma_A, double shear, int no) {
 
 	// write all parameters to the file, check whether successful
 	int check;
-	if ((check = fprintf(file, "Number of particles (N)              	: %d\n",  N)) < 1)
-		return EXIT_FAILURE;
-	if ((check = fprintf(file, "Energie (k_B*T)				      		: %lf\n", kT)) < 1)
-		return EXIT_FAILURE;
 	if ((check = fprintf(file, "Dipole interaction relation (Gamma_A)	: %lf\n", Gamma_A)) < 1)
 		return EXIT_FAILURE;
 	if ((check = fprintf(file, "Particle dipole ratio (m)				: %lf\n", m)) < 1)
 		return EXIT_FAILURE;
 	if ((check = fprintf(file, "Shear rate A (shear_A)               	: %lf\n", shear)) < 1)
-		return EXIT_FAILURE;
-	if ((check = fprintf(file, "Brownian Diffusion Time (tau_B)       	: %lf\n", tau_B)) < 1)
-		return EXIT_FAILURE;
-	if ((check = fprintf(file, "Brownian Diffusion (D_Brown_A)	    	: %lf\n", D_A)) < 1)
 		return EXIT_FAILURE;
 	if ((check = fprintf(file, "Particle Diffusion ratio (D_rat)		: %lf\n", D_rat)) < 1)
 		return EXIT_FAILURE;
@@ -215,8 +197,6 @@ int builder (double m, double Gamma_A, double shear, int no) {
 	if ((check = fprintf(file, "Destination file (outfile)           	: %s\n",  outfile)) < 1)
 		return EXIT_FAILURE;
 	if ((check = fprintf(file, "Iterations                           	: %d\n",  iter)) < 1)
-		return EXIT_FAILURE;
-	if ((check = fprintf(file, "Number of Threads                     	: %d\n",  threads)) < 1)
 		return EXIT_FAILURE;
 	if ((check = fprintf(file, "Writeout step                          	: %d\n",  writestep)) < 1)
 		return EXIT_FAILURE;
