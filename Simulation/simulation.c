@@ -132,10 +132,9 @@ int init(struct sim_struct *param) {
 	// compute the force at cutoff value, this force will be deducted from the system
 	force_cutoff	= 3*Gamma_A/(cutoff_squared*cutoff_squared);
 
-	// compute the size of the Verlet list, add 20% as safety margin
-	// N_Verlet = N*PI*cutoff_squared/(L*L);
-	// N_Verlet *= 1.2;
-	N_Verlet = N;
+	// compute the size of the Verlet list, add 15% as safety margin
+	N_Verlet = N*PI*cutoff_squared/(L*L);
+	N_Verlet *= 1.15;
 
 	// allocate memory for fundamentally important arrays
 	position = 			malloc(2*N*sizeof(double));
