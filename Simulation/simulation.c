@@ -551,6 +551,7 @@ void simulation (void) {
 
 	fprintf(stdout, "Starting simulation ID: %d at %s"
 					"Parameters N: %d, m: %.2lf, Gamma: %.0lf, Shear: %.0lf, Steps: %d\n\n", sim_number, time_string, N, m, Gamma_A, shear, max_timesteps);
+	fflush(stdout);
 
 	// iterate over all timesteps
 	while (timesteps <= max_timesteps) {
