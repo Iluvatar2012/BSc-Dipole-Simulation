@@ -8,7 +8,10 @@
 #ifndef SIMULATION_H_
 #define SIMULATION_H_
 
-extern int 	init(void);
+extern struct sim_struct 	*make_sim_struct (void);
+extern int 					read_struct (char*);
+
+extern int 	init(struct sim_struct*);
 extern void simulation(void);
 extern void	update_verlet(void);
 
