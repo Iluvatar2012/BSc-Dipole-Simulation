@@ -587,7 +587,7 @@ void simulation (void) {
 			rem_time = current_time - init_time;
 
 			// give user a coherent overview
-			fprintf(stdout, "Progress: \t\t\t[");
+			fprintf(stdout, "ID: %d, Progress: \t\t[", sim_number);
 
 			for(int i=0; i<floor(perc); i++) {
 				fprintf(stdout, "=");
