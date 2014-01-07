@@ -151,7 +151,7 @@ int builder (double D_rat, double Gamma_A, double shear, int no) {
 	strncat(config, buf, 32);
 
 	// append the binary relation m
-	strncat(outfile, "D_rat_", 4);
+	strncat(outfile, "D_rat_", 6);
 	sprintf(buf, "%1.2lf", m);
 	strncat(outfile, buf, 64);
 
