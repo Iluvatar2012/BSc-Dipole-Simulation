@@ -27,18 +27,13 @@ static int iter;
 
 /*-------------------------------------------------------------------------------------------------------*/
 /*	Template for config file:
-*	Number of particles (N)              	: 1000
-*	Energie (k_B*T)							: 1
 *	Dipole interaction relation (Gamma_A)  	: 200
 *	Particle dipole ratio (m)				: 0.1
-*	Shear rate A (shear_A)               	: 0
-*	Brownian Diffusion Time (tau_B)       	: 1
-*	Brownian Diffusion (D_Brown_A)	       	: 1
+*	Shear rate A (shear_A)               	: 200
 * 	Particle Diffusion ratio (D_rat)		: 1.7
 *	Time difference (delta_t)            	: 1e-6
 *	Destination file (outfile)           	: Results/default.hdf5
 *	Iterations                           	: 100000
-*	Number of Threads                    	: 8
 *	Writeout step                          	: 1000
 */
 
