@@ -3,7 +3,7 @@
 #include <string.h>
 
 // define variables which will probably not be altered, except for hardcode
-#define 	D_rat		1.7
+#define 	m			0.1
 #define 	dt 			1e-6
 #define 	writestep	1000
 
@@ -52,7 +52,7 @@ static int iter;
 /*	This function reads from a provided builder file and builds the according files, template as follows:
 *
 *	iter 			1000000
-*	m 				0.1 		1.0 		0.1
+*	D_rat			0.1 		1.0 		0.1
 *	Gamma 			10 			100 		10
 *	shear 			0			1000 		20
 *
@@ -62,7 +62,7 @@ int read_build (char* infile) {
 	int check = 1;
 
 	// variables to be read
-	double 	m_min, m_max, m_step;
+	double 	D_min, D_max, D_step;
 	double 	G_min, G_max, G_step;
 	double 	s_min, s_max, s_step;
 
@@ -77,7 +77,7 @@ int read_build (char* infile) {
 
 	if (check != 0 && (check = fscanf(file, "iter 			%d\n", &iter)) < 1)
 		check = 0;
-	if (check != 0 && (check = fscanf(file, "m 				%lf 		%lf 		%lf\n", &m_min, &m_max, &m_step)) < 1)
+	if (check != 0 && (check = fscanf(file, "D_rat			%lf 		%lf 		%lf\n", &D_min, &D_max, &D_step)) < 1)
 		check = 0;
 	if (check != 0 && (check = fscanf(file, "Gamma 			%lf 		%lf	 		%lf\n", &G_min, &G_max, &G_step)) < 1)
 		check = 0;
@@ -87,7 +87,6 @@ int read_build (char* infile) {
 	// check whether all reads were successful
 	if (check < 1) {
 		fprintf(stderr, "Variables could not be correctly read from file \"%s,\" program will now terminate. \n", infile);
-		fprintf(stderr, "%lf, %lf, %lf\n", G_min, G_max, G_step);
 		return EXIT_FAILURE;
 	}
 
@@ -95,7 +94,7 @@ int read_build (char* infile) {
 	fclose(file);
 
 	// check whether the given variables actually make any sense
-	if (m_min < 0 || m_min > m_max || \
+	if (D_min < 0 || D_min > D_max || \
 		G_min < 0 || G_min > G_max || \
 		s_min < 0 || s_min > s_max) {
 		fprintf(stderr, "Variables either negative or minimum larger than maximum values, please check file and try again.\n");
@@ -106,11 +105,11 @@ int read_build (char* infile) {
 	int i = 1;
 
 	// if everthing is in order, iterate over all provided variables and finally write the files
-	for (double m = m_min; m <= m_max; m += m_step) {
+	for (double D = D_min; D <= D_max; D += D_step) {
 		for (double G = G_min; G <= G_max; G += G_step) {
 			for (double s = s_min; s <= s_max; s += s_step) {
 				// call the file builder, increase file counter
-				check = builder(m, G, s, i);
+				check = builder(D, G, s, i);
 				i++;
 
 				// check whether function worked properly
@@ -140,7 +139,7 @@ int read_build (char* infile) {
 /*-------------------------------------------------------------------------------------------------------*/
 // The following function defines a builder for a series of config files with differing parameters
 
-int builder (double m, double Gamma_A, double shear, int no) {
+int builder (double D_rat, double Gamma_A, double shear, int no) {
 	// construct the filename to which config data will be written
 	char config[1024] = "Config_Files/";
 
@@ -152,7 +151,7 @@ int builder (double m, double Gamma_A, double shear, int no) {
 	strncat(config, buf, 32);
 
 	// append the binary relation m
-	strncat(outfile, "m_", 4);
+	strncat(outfile, "D_rat_", 4);
 	sprintf(buf, "%1.2lf", m);
 	strncat(outfile, buf, 64);
 
