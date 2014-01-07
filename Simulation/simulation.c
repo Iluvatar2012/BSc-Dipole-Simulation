@@ -21,10 +21,12 @@
 // Basic values of Simulation
 static double cutoff;
 static double cutoff_squared;
+
 static double delta_t;
+static double t_passed;
 static double timestep;
-static double box;
 static int	  max_timesteps;
+
 static int 	  write_step;
 static int 	  sim_number;
 
@@ -100,7 +102,7 @@ int init(struct sim_struct *param) {
 
 	// release valuable memory space
 	free(param);
-	
+
 
 	// Initiate random number generator (0,1), use system time as seed
     time_t t;
@@ -118,11 +120,10 @@ int init(struct sim_struct *param) {
 
 	// set values of remaining static variables
 	delta_t				= tau_B * timestep;
+	t_passed			= 0;
 
 	weigh_brown_A 		= sqrt(2.0 * D_Brown_A * delta_t);
 	weigh_brown_B 		= sqrt(2.0 * D_Brown_B * delta_t);
-
-	box 				= 0;
 
 	cutoff 				= (L/2.0);
 	cutoff_squared 		= cutoff*cutoff;
@@ -132,8 +133,9 @@ int init(struct sim_struct *param) {
 	force_cutoff	= 3*Gamma_A/(cutoff_squared*cutoff_squared);
 
 	// compute the size of the Verlet list, add 20% as safety margin
-	N_Verlet = N*PI*cutoff_squared/(L*L);
-	N_Verlet *= 1.2;
+	// N_Verlet = N*PI*cutoff_squared/(L*L);
+	// N_Verlet *= 1.2;
+	N_Verlet = N;
 
 	// allocate memory for fundamentally important arrays
 	position = 			malloc(2*N*sizeof(double));
@@ -220,7 +222,7 @@ int init(struct sim_struct *param) {
 static void *iteration (int *no) {
 	// Define necessary variables
 	double xi, xj, yi, yj;
-	double dx, dy, sig_y;
+	double dx, dy;
 	double r_squared;
 
 	double temp_force;
@@ -310,13 +312,9 @@ static void *iteration (int *no) {
 				dx = xi - xj;
 				dy = yi - yj;
 
-				// alter dx, this accounts for Lees-Edwards conditions
-				sig_y 	= dround(dy*Li);
-				dx 		+= sig_y * (box);
-
 				// find images through altering dx and dy
-				dx -= dround(dx*Li)*L;
-				dy -= sig_y * L;
+				dx -= dround(dx*Li) * L;
+				dy -= dround(dy*Li) * L;
 
 				// get square of distance and compute force in x and y direction
 				r_squared = dx*dx + dy*dy;
@@ -354,13 +352,9 @@ static void *iteration (int *no) {
 				dx = xi - xj;
 				dy = yi - yj;
 
-				// alter dx, this accounts for Lees-Edwards conditions
-				sig_y 	= dround(dy*Li);
-				dx 		+= sig_y * (box);
-
 				// find images through altering dx and dy
-				dx -= dround(dx*Li)*L;
-				dy -= sig_y * L;
+				dx -= dround(dx*Li) * L;
+				dy -= dround(dy*Li) * L;
 
 				// get square of distance and compute force in x and y direction
 				r_squared = dx*dx + dy*dy;
@@ -411,12 +405,15 @@ static void *iteration (int *no) {
 				verlet_max[2*(*no)+1] = temp;
 			}
 
-			// Calculate x positions with periodic boundary conditions, check whether the particle moved from one row to another
-			position[2*i] 	-= floor(position[2*i]/L)*L;
-			position[2*i]	-= (floor((position[2*i+1]+L)/L)-1)*(box);
+			// transpose particle from laboratory system S into moving system S'
+			position[2*i]	-= shear * position[2*i]*t_passed;
 
-			// Calculate y positions with periodic boundary conditions
+			// Calculate x and y positions with periodic boundary conditions in S'
+			position[2*i] 	-= floor(position[2*i]/L)*L;
 			position[2*i+1] -= floor(position[2*i+1]/L)*L;
+
+			// transpose particle back from S' to S
+			position[2*i]	+= shear * position[2*i]*t_passed;
 		}
 
 		// compute new positions for particles B from forces, remember periodic boundary conditions
@@ -452,13 +449,20 @@ static void *iteration (int *no) {
 				verlet_max[2*(*no)+1] = temp;
 			}
 
-			// Calculate x positions with periodic boundary conditions, check whether the particle moved from one row to another
-			position[2*i] 	-= floor(position[2*i]/L)*L;
-			position[2*i]	-= (floor((position[2*i+1]+L)/L)-1)*(box);
+			// transpose particle from laboratory system S into moving system S'
+			position[2*i]	-= shear * position[2*i]*t_passed;
 
-			// Calculate y positions with periodic boundary conditions
+			// Calculate x and y positions with periodic boundary conditions in S'
+			position[2*i] 	-= floor(position[2*i]/L)*L;
 			position[2*i+1] -= floor(position[2*i+1]/L)*L;
+
+			// transpose particle back from S' to S
+			position[2*i]	+= shear * position[2*i]*t_passed;
 		}
+
+		// increase time passed
+		t_passed += delta_t;
+
 		// Signal to main thread, that all threads have finished their iteration
 		pthread_barrier_wait(&barrier_main_one);
 
@@ -563,10 +567,6 @@ void simulation (void) {
 			}
 		}
 
-		// adjust orientation of upper and lower box row
-		box += shear*L*delta_t;
-		box -= floor(box/L)*L;
-
 		// check if verlet list has to be updated
 		if ((verlet_max_1+verlet_max_2) > d_cutoff_verlet) {
 			update_verlet();
@@ -576,6 +576,7 @@ void simulation (void) {
 
 		// check whether parameters should be written to declared external file
 		if ((timesteps%write_step) == 0) {
+			update_verlet();
 			write_data(timesteps, position);
 
 			// compute percentage of program already completed
@@ -654,11 +655,18 @@ void simulation (void) {
 void update_verlet (void) {
 	// define necessary variables: i, j and temporary position variables,
 	double xi, yi, xj, yj;
-	double dx, dy, sig_y;
+	double dx, dy;
 	double r_squared;
 
 	// count how many values there are in the list
 	int k;
+
+	// reset time counter and reset all particles to have the original square layout
+	t_passed = 0;
+
+	for (int i=0; i<N; i++) {
+		position[2*i] 	-= floor(position[2*i]/L)*L;
+	}
 
 	// iterate over all particles, read positions
 	for (int i=0; i<N; i++) {
@@ -677,13 +685,9 @@ void update_verlet (void) {
 			dx = xi - xj;
 			dy = yi - yj;
 
-			// alter dx, this accounts for Lees-Edwards conditions
-			sig_y 	= dround(dy*Li);
-			dx 		+= sig_y * box;
-
 			// find images through altering dx and dy
-			dx -= dround(dx*Li)*L;
-			dy -= sig_y * L;
+			dx -= dround(dx*Li) * L;
+			dy -= dround(dy*Li) * L;
 
 			// find out squared distance and check against the verlet cutoff
 			r_squared = dx*dx + dy*dy;
@@ -713,13 +717,9 @@ void update_verlet (void) {
 			dx = xi - xj;
 			dy = yi - yj;
 
-			// alter dx, this accounts for Lees-Edwards conditions
-			sig_y 	= dround(dy*Li);
-			dx 		+= sig_y * box;
-
 			// find images through altering dx and dy
-			dx -= dround(dx*Li)*L;
-			dy -= sig_y * L;
+			dx -= dround(dx*Li) * L;
+			dy -= dround(dy*Li) * L;
 
 			// find out squared distance and check against the verlet cutoff
 			r_squared = dx*dx + dy*dy;
