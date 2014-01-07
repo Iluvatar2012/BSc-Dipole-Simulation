@@ -257,9 +257,6 @@ int graphicOutput () {
 		SDL_Delay(40);
 	}
 
-	// TRIAL: Save the last screen to file
-	SDL_SaveBMP(screen, "test.bmp");
-
 	// clear memory of everything cluttering it
 	SDL_FreeSurface(ball_even);
 	SDL_FreeSurface(ball_uneven);
