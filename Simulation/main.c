@@ -737,9 +737,9 @@ void simulation (void) {
 	time(&current_time);
 	time_string = ctime(&current_time);
 
-	fprintf(stdout, "\nFinished simulation at %s"
+	fprintf(stdout, "\n\nFinished simulation at %s"
 					"Parameters N: %d, m: %.2lf, Gamma: %.0lf, Shear: %.0lf, Steps: %d\n"
-					"Elapsed time: %d seconds\n", time_string, N, m, Gamma_A, shear, max_timesteps, (int)(current_time - init_time));
+					"Elapsed time: %d seconds\n\n\n", time_string, N, m, Gamma_A, shear, max_timesteps, (int)(current_time - init_time));
 	fflush(stdout);
 }
 
