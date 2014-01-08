@@ -77,7 +77,7 @@ static pthread_barrier_t 	barrier_internal;
 
 
 /*-------------------------------------------------------------------------------------------------------*/
-int init(struct sim_struct *param) {
+int init(struct sim_struct *param, double* init_positions) {
 
 	// copy values from incoming struct
 	N 				= param->struct_N;
@@ -136,8 +136,13 @@ int init(struct sim_struct *param) {
 	N_Verlet = N*PI*cutoff_squared/(L*L);
 	N_Verlet *= 1.15;
 
-	// allocate memory for fundamentally important arrays
-	position = 			malloc(2*N*sizeof(double));
+	// allocate memory for fundamentally important arrays, check whether the user has provided an initial configuration
+	if (init_positions != NULL) {
+		position = 		init_positions;
+	} else {
+		position = 		malloc(2*N*sizeof(double));
+	}
+
 	force = 			malloc(2*N*sizeof(double));
 	verlet = 			malloc(N*N_Verlet*sizeof(int));
 	verlet_distance = 	malloc(2*N*sizeof(double));
@@ -152,7 +157,13 @@ int init(struct sim_struct *param) {
 		return EXIT_FAILURE;
 	}
 
-/*	// compute initial particle positions, the particles shall be placed upon an evenly spaced grid
+	// check whether we still need to set the position values, initiate Verlet list
+	if (init_positions != NULL) {
+		update_verlet();
+		return EXIT_SUCCESS;
+	}
+
+	/*	// compute initial particle positions, the particles shall be placed upon an evenly spaced grid
 	double init_x = 0;
 	double init_y = 0;
 
@@ -167,6 +178,7 @@ int init(struct sim_struct *param) {
 		position[i+1] 	= init_y;
 	}
 	*/
+
 
 	// compute initial particle positions, the particles shall be placed randomly with minimum distance criteria
 	short done;

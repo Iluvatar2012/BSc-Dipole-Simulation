@@ -76,6 +76,7 @@
 #include "simulation.h"
 #include "read_config.h"
 #include "structs.h"
+#include "hdf5_output.h"
 
 
 
@@ -172,12 +173,20 @@ int main(int argcount, char** argvektor) {
 	char infile[1024];
 	unsigned int length = 1024;
 
-	if(argcount == 3) {
+	double* init_positions;
+
+	if(argcount == 4) {
 		strncpy(infile, argvektor[1], length);
 		sim_number = atoi(argvektor[2]);
+		init_positions = read_configuration(argvektor[3]);
+	} else if (argcount == 3) {
+		strncpy(infile, argvektor[1], length);
+		sim_number = atoi(argvektor[2]);
+		init_positions = NULL;
 	} else {
 		strncpy(infile,"Config_Files/default", length);		// default
 		sim_number = 0;
+		init_positions = NULL;
 	}
 
 	// pass arguments to file reader
@@ -192,7 +201,7 @@ int main(int argcount, char** argvektor) {
 	struct sim_struct *sim = make_sim_struct();
 
 	// Initiate all variables, here a memory problem is most likely the issue at hand
-	success_check = init(sim);
+	success_check = init(sim, init_positions);
 	if(success_check != EXIT_SUCCESS) {
 		return EXIT_FAILURE;
 	}

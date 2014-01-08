@@ -239,3 +239,73 @@ int reopen_file(double* position, int writeouts, int* count_written) {
 	// return to caller
 	return EXIT_SUCCESS;
 }
+
+
+
+
+
+
+
+
+
+
+
+/*-------------------------------------------------------------------------------------------------------*/
+double* read_configuration(char* infile) {
+
+	// variable which we will return and will hold the last position data
+	double* position;
+
+	// various identifiers
+	hid_t	file_id, dataset_id, attr_id_one, attr_id_two;
+	hid_t	dataspace_id, tempspace_id;
+
+	// default error variable
+	herr_t 	status;
+
+	// open file, dataset and an attribute, check if successful
+	file_id 	= H5Fopen(infile, H5F_ACC_RDWR, H5P_DEFAULT);
+
+	if (file_id < 0) {
+		fprintf(stderr, "Initial file could not be opened, process will terminate now \"%s\"\n", infile);
+		return NULL;
+	}
+
+	dataset_id 	= H5Dopen2(file_id, "/positions", H5P_DEFAULT);
+	attr_id_one	= H5Aopen(dataset_id, "Last_Writeout", H5P_DEFAULT);
+	attr_id_two = H5Aopen(dataset_id, "N", H5P_DEFAULT);
+
+	// copy the attributes into counter and N variable
+	status	= H5Aread(attr_id_one, H5T_NATIVE_INT, &counter);
+	status	= H5Aread(attr_id_two, H5T_NATIVE_INT, &N);
+
+	// try to get memory from the system
+	position = malloc(2*N*sizeof(double));
+
+	if (position == NULL) {
+		fprintf(stderr, "Memory for copying position data could not be allocated. \n");
+		return NULL;
+	}
+
+	// variables for offset and size of data copied
+	hsize_t offset[2] 	= {counter, 0};
+	hsize_t slabdim[2] 	= {1, 2*N};
+
+	// select a hyperslab of the last positions stored in the file and save it to the position array
+	tempspace_id = H5Screate_simple(2, slabdim, NULL);
+	dataspace_id = H5Dget_space(dataset_id);
+
+	status = H5Sselect_hyperslab(dataspace_id, H5S_SELECT_SET, offset, NULL, slabdim, NULL);
+	status = H5Dread(dataset_id, H5T_NATIVE_DOUBLE, tempspace_id, dataspace_id, H5P_DEFAULT, position);
+
+	// terminate all access to and close the file
+	status = H5Aclose(attr_id_one);
+	status = H5Aclose(attr_id_two);
+	status = H5Dclose(dataset_id);
+	status = H5Sclose(tempspace_id);
+	status = H5Sclose(dataspace_id);
+	status = H5Fclose(file_id);
+
+	// return to caller
+	return position;
+}

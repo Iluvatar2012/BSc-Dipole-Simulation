@@ -8,8 +8,9 @@
 #ifndef HDF5_OUTPUT_H_
 #define HDF5_OUTPUT_H_
 
-extern int 	create_file (char*, int, int);
-extern void	write_data(int, double*);
-extern int 	reopen_file(double*, int, int*);
+extern int 		create_file (char*, int, int);
+extern void		write_data(int, double*);
+extern int 		reopen_file(double*, int, int*);
+extern double 	*read_configuration(char*);
 
 #endif /* HDF5_WRITE_H_ */

@@ -4,5 +4,5 @@ Shear rate A (shear_A)               	: 0
 Particle Diffusion ratio (D_rat)		: 1.7
 Time difference (delta_t)            	: 1e-6
 Destination file (outfile)           	: Results/default.hdf5
-Iterations                           	: 1000000
+Iterations                           	: 1000
 Writeout step                          	: 10

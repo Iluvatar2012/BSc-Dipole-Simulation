@@ -11,7 +11,7 @@
 extern struct sim_struct 	*make_sim_struct (void);
 extern int 					read_struct (char*);
 
-extern int 	init(struct sim_struct*);
+extern int 	init(struct sim_struct*, double*);
 extern void simulation(void);
 extern void	update_verlet(void);
 
