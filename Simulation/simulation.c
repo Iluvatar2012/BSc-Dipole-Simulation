@@ -401,14 +401,14 @@ static void *iteration (int *no) {
 			}
 
 			// transpose particle from laboratory system S into moving system S'
-			position[2*i]	-= shear * position[2*i+1]*t_passed;
+			position[2*i]	-= shear * position[2*i+1]/L*t_passed;
 
 			// Calculate x and y positions with periodic boundary conditions in S'
 			position[2*i] 	-= floor(position[2*i]/L)*L;
 			position[2*i+1] -= floor(position[2*i+1]/L)*L;
 
 			// transpose particle back from S' to S
-			position[2*i]	+= shear * position[2*i+1]*t_passed;
+			position[2*i]	+= shear * position[2*i+1]/L*t_passed;
 		}
 
 		// compute new positions for particles B from forces, remember periodic boundary conditions
@@ -445,14 +445,14 @@ static void *iteration (int *no) {
 			}
 
 			// transpose particle from laboratory system S into moving system S'
-			position[2*i]	-= shear * position[2*i+1]*t_passed;
+			position[2*i]	-= shear * position[2*i+1]/L*t_passed;
 
 			// Calculate x and y positions with periodic boundary conditions in S'
 			position[2*i] 	-= floor(position[2*i]/L)*L;
 			position[2*i+1] -= floor(position[2*i+1]/L)*L;
 
 			// transpose particle back from S' to S
-			position[2*i]	+= shear * position[2*i+1]*t_passed;
+			position[2*i]	+= shear * position[2*i+1]/L*t_passed;
 		}
 
 		// increase time passed
