@@ -8,6 +8,8 @@
 #include <math.h>
 #include <pthread.h>
 
+#include <unistd.h>
+
 // own header files
 #include "structs.h"
 #include "simulation.h"
