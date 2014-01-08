@@ -364,10 +364,6 @@ static void *iteration (int *no) {
 			}
 		}
 
-		// check again whether we should return, just to get rid of race conditions
-		if (cont != 1)
-			break;
-
 		// wait for all threads to finish iteration of forces, then continue with writing position data
 		pthread_barrier_wait(&barrier_internal);
 
@@ -624,15 +620,10 @@ void simulation (void) {
 		pthread_barrier_wait(&barrier_main_two);
 	}
 
-	// terminate all threads and ask them to join, this way no resources are wasted
-	cont = 0;
-
+	// terminate all threads
 	for (int i=0; i<thread_number; i++) {
-		pthread_join(threads[i], NULL);
+		pthread_cancel(threads[i]);
 	}
-
-	// insert an empty line
-	fprintf(stderr, "\n");
 
 	// end of simulation, free all allocated memory space
 	free(position);
