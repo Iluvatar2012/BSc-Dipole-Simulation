@@ -505,11 +505,11 @@ void simulation (void) {
 	sprintf(buf, "%d", sim_number);
 	strncat(job, buf, 32);
 
-	/*FILE *file = fopen(job, "w+");
+	FILE *file = fopen(job, "w+");
 	if (file == NULL) {
 		fprintf(stderr, "File \"%s\" could not be opened, program will terminate. \n", job);
 		return;
-	}*/
+	}
 
 	// Initiate timestep-counter and continuation value
 	timesteps = 0;
@@ -525,7 +525,7 @@ void simulation (void) {
 
 		// iterate what timestep we are at
 		timesteps = write_step * written;
-		fprintf(stdout, "Timestep: %d\n", timesteps);
+		fprintf(file, "Timestep: %d\n", timesteps);
 	}
 	else {
 		//write_file(position, timesteps, N);
@@ -561,9 +561,9 @@ void simulation (void) {
 	time(&init_time);
 	time_string = ctime(&init_time);
 
-	fprintf(stdout, "Starting simulation ID: %d at %s"
+	fprintf(file, "Starting simulation ID: %d at %s"
 					"Parameters N: %d, m: %.2lf, Gamma: %.0lf, Shear: %.0lf, Steps: %d\n\n", sim_number, time_string, N, m, Gamma_A, shear, max_timesteps);
-	fflush(stdout);
+	fflush(file);
 
 	// iterate over all timesteps
 	while (timesteps <= max_timesteps) {
@@ -600,22 +600,22 @@ void simulation (void) {
 			rem_time = current_time - init_time;
 
 			// give user a coherent overview
-			fprintf(stdout, "ID: %d, Progress: \t\t[", sim_number);
+			fprintf(file, "ID: %d, Progress: \t\t[", sim_number);
 
 			for(int i=0; i<floor(perc); i++) {
-				fprintf(stdout, "=");
+				fprintf(file, "=");
 			}
 
 			if (perc != 100)
-				fprintf(stdout, ">");
+				fprintf(file, ">");
 
 			for (int i=floor(perc)+1; i<100; i++) {
-				fprintf(stdout, ".");
+				fprintf(file, ".");
 			}
 
-			fprintf(stdout, "] \t%.1lf%%\t\telapsed time: %d s\r", perc, (int)(rem_time));
+			fprintf(file, "] \t%.1lf%%\t\telapsed time: %d s\r", perc, (int)(rem_time));
 
-			fflush(stdout);
+			fflush(file);
 		}
 
 		// increase timesteps and continue waiting threads
@@ -648,11 +648,11 @@ void simulation (void) {
 	time(&current_time);
 	time_string = ctime(&current_time);
 
-	fprintf(stdout, "\n\nFinished simulation ID: %d at %s"
+	fprintf(file, "\n\nFinished simulation ID: %d at %s"
 					"Parameters N: %d, m: %.2lf, Gamma: %.0lf, Shear: %.0lf, Steps: %d\n"
 					"Elapsed time: %d seconds\n\n\n", sim_number, time_string, N, m, Gamma_A, shear, max_timesteps, (int)(current_time - init_time));
-	fflush(stdout);
-	//fclose(file);
+	fflush(file);
+	fclose(file);
 }
 
 
