@@ -632,10 +632,12 @@ void simulation (void) {
 		pthread_barrier_wait(&barrier_main_two);
 	}
 
-	// terminate all threads
+	// terminate all threads, wait for every one to finish
 	for (int i=0; i<thread_number; i++) {
 		pthread_cancel(threads[i]);
 	}
+
+	sleep(1);
 
 	// end of simulation, free all allocated memory space
 	free(position);
