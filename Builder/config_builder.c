@@ -152,7 +152,7 @@ int builder (double D_rat, double Gamma_A, double shear, int no) {
 
 	// append the binary relation m
 	strncat(outfile, "D_rat_", 6);
-	sprintf(buf, "%1.2lf", m);
+	sprintf(buf, "%.2lf", D_rat);
 	strncat(outfile, buf, 64);
 
 	// append the dipole relation Gamma
