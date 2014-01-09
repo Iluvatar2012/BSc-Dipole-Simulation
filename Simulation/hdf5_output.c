@@ -7,6 +7,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
 #include <hdf5.h>
 #include <unistd.h>
 
@@ -308,4 +310,76 @@ double* read_configuration(char* infile) {
 
 	// return to caller
 	return position;
+}
+
+
+
+
+
+
+
+
+
+
+
+/*-------------------------------------------------------------------------------------------------------*/
+int create_displacement_file (char* infile, int N, double* displacement) {
+
+	// seperate dimension properties
+	hsize_t dimension[2] 	= {1, 2*N};
+	hsize_t	offset[2]		= {0, 0};
+
+	// identifiers of all relevant spaces and chunking properties
+	hid_t	file_id, dataspace_id, dataset_id, tempset_id;
+	hid_t	property;
+
+	// checking value whether operations were successful
+	herr_t	status;
+
+	// concatenate something to the infile string
+	char* dot 		= strrchr(infile, '.');
+	*dot 			= '\0';
+
+	size_t length 	= strlen(infile);
+	strncat(infile, "__displacement.hdf5", 1024-length);
+
+	// set maximum dimension size and attribute size
+	hsize_t maxdims[2] 		= {1, 2*N};
+
+	// check whether file already exists, if not create new file using the identifier
+	if (access(file, F_OK) != -1)
+		return EXIT_FAILURE;
+
+	file_id = H5Fcreate(file, H5F_ACC_EXCL, H5P_DEFAULT, H5P_DEFAULT);
+
+	// create a new dataspace for the position data of all particles
+	dataspace_id 	= H5Screate_simple(2, dimension, maxdims);
+
+	// create a property list
+	property		= H5Pcreate(H5P_DATASET_CREATE);
+
+	// create a temporary dataspace, which will be used to write the current positions to the file
+	tempset_id = H5Screate_simple(2, chunkdims, NULL);
+
+	// create a new dataset for the positions of all particles, at this point the dataset will have dimension zero
+	dataset_id		= H5Dcreate2(file_id, "/displacement", H5T_NATIVE_DOUBLE, dataspace_id, H5P_DEFAULT, property, H5P_DEFAULT);
+
+	// select one hyperslab
+	status			= H5Sselect_hyperslab(dataspace_id, H5S_SELECT_SET, offset, NULL, dimension, NULL);
+
+	// write current positions to the file, check whether operation was successful
+	status = H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, tempset_id, dataspace_id, H5P_DEFAULT, displacement);
+
+	// terminate access to all parts of the document and close the file
+	status = H5Pclose(property);
+	status = H5Dclose(dataset_id);
+	status = H5Sclose(dataspace_id);
+	status = H5Fclose(file_id);
+
+	// check whether file could be closed
+	if (status <0)
+		fprintf(stderr, "Error closing the file, execution will continue. \n");
+
+	// return to caller
+	return EXIT_SUCCESS;
 }

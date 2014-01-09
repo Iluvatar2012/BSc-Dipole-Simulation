@@ -40,6 +40,7 @@ static double m;
 // Arrays for mechanical movement
 static double* force;
 static double* position;
+static double* displacement;
 
 // System properties
 static int 	  N;
@@ -138,14 +139,16 @@ int init(struct sim_struct *param, double* init_positions) {
 	N_Verlet = N*PI*cutoff_squared/(L*L);
 	N_Verlet *= 1.15;
 
-	// allocate memory for fundamentally important arrays, check whether the user has provided an initial configuration
+	// check whether an old configuration of data can be used or whether new memory has to be allocated
 	if (init_positions != NULL) {
 		position = 		init_positions;
 	} else {
 		position = 		malloc(2*N*sizeof(double));
 	}
 
+	// allocate memory for fundamentally important arrays
 	force = 			malloc(2*N*sizeof(double));
+	displacement = 		malloc(2*N*sizeof(double));
 	verlet = 			malloc(N*N_Verlet*sizeof(int));
 	verlet_distance = 	malloc(2*N*sizeof(double));
 	threads = 			malloc(thread_number*sizeof(pthread_t));
@@ -153,10 +156,17 @@ int init(struct sim_struct *param, double* init_positions) {
 	numbers = 			malloc(thread_number*sizeof(int));
 	verlet_max = 		malloc(2*thread_number*sizeof(double));
 
-	if((position == NULL) || (force == NULL) || (verlet == NULL) || (verlet_distance == NULL) || \
+	// check if successful
+	if((position == NULL) || (displacement == NULL) || (force == NULL) || (verlet == NULL) || (verlet_distance == NULL) || \
 			(threads == NULL) || (borders == NULL) || (numbers == NULL) || (verlet_max == NULL)) {
 		fprintf(stderr, "Memory space for fundamentally important arrays could not be allocated.\n");
 		return EXIT_FAILURE;
+	}
+
+	// initiate all displacement values to 0
+	for (int i=0; i<N; i++) {
+		displacement[2*i]	= 0;
+		displacement[2*i+1] = 0;
 	}
 
 	// check whether we still need to set the position values, initiate Verlet list
@@ -399,9 +409,15 @@ static void *iteration (int *no) {
 			g1 = temp*cos(TWO_PI*u2);
 			g2 = temp*sin(TWO_PI*u2);
 
-			// Calculate next positions and speeds for all particles
-			position[2*i] 	+= D_kT_one*delta_t*(force[2*i] + position[2*i+1]/L*shear_one) + weigh_brown_one*g1;
-			position[2*i+1] += D_kT_one*delta_t*force[2*i+1] + weigh_brown_one * g2;
+			// Calculate next positions and total displacement for all particles
+			dx = D_kT_one*delta_t*(force[2*i] + position[2*i+1]/L*shear_one) + weigh_brown_one*g1;
+			dy = D_kT_one*delta_t*force[2*i+1] + weigh_brown_one * g2;
+
+			position[2*i]		+= dx;
+			position[2*i+1] 	+= dy;
+
+			displacement[2*i]	+= dx;
+			displacement[2*i+1] += dy;
 
 			// update list of total displacement for each particle after last verlet-list update
 			verlet_distance[2*i] 	+= (xi - position[2*i]);
@@ -443,9 +459,15 @@ static void *iteration (int *no) {
 			g1 = temp*cos(TWO_PI*u2);
 			g2 = temp*sin(TWO_PI*u2);
 
-			// Calculate next positions and speeds for all particles
-			position[2*i] 	+= D_kT_two*delta_t*(force[2*i] + position[2*i+1]/L*shear_two) + weigh_brown_two*g1;
-			position[2*i+1] += D_kT_two*delta_t*force[2*i+1] + weigh_brown_two * g2;
+			// Calculate next positions and total displacement for all particles
+			dx = D_kT_two*delta_t*(force[2*i] + position[2*i+1]/L*shear_two) + weigh_brown_two*g1;
+			dy = D_kT_two*delta_t*force[2*i+1] + weigh_brown_two * g2;
+
+			position[2*i]		+= dx;
+			position[2*i+1] 	+= dy;
+
+			displacement[2*i]	+= dx;
+			displacement[2*i+1] += dy;
 
 			// update list of total displacement for each particle after last verlet-list update
 			verlet_distance[2*i] 	+= (xi - position[2*i]);
@@ -641,9 +663,15 @@ void simulation (void) {
 
 	sleep(1);
 
+	// print total displacement to stdout
+	create_displacement_file (outfile, N, displacement);
+
+	fflush(stdout);
+
 	// end of simulation, free all allocated memory space
 	free(position);
 	free(force);
+	free(displacement);
 	free(verlet);
 	free(verlet_distance);
 	free(verlet_max);
@@ -657,7 +685,7 @@ void simulation (void) {
 
 	fprintf(file, "\n\nFinished simulation ID: %d at %s"
 					"Parameters N: %d, m: %.2lf, Gamma: %.0lf, Shear: %.0lf, Steps: %d\n"
-					"Elapsed time: %d seconds\n\n\n", sim_number, time_string, N, m, Gamma_A, shear, max_timesteps, (int)(current_time - init_time));
+					"Elapsed time: %d seconds\n\n", sim_number, time_string, N, m, Gamma_A, shear, max_timesteps, (int)(current_time - init_time));
 	fflush(file);
 	fclose(file);
 }

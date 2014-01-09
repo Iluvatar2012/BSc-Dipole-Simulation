@@ -12,5 +12,6 @@ extern int 		create_file (char*, int, int);
 extern void		write_data(int, double*);
 extern int 		reopen_file(double*, int, int*);
 extern double 	*read_configuration(char*);
+extern int 		create_displacement_file (char*, int, double*);
 
 #endif /* HDF5_WRITE_H_ */
