@@ -1,11 +1,15 @@
+#include <hdf5.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-double* read_config (char* file, char* number) {
+
+
+/*----------------------------------------------------------------------------------------------------------------------------*/
+double* read_config (char* file, char* number, int* N) {
 
 	// Basic variables
-	int N;
 	int writes;
 	int step;
 
@@ -31,11 +35,11 @@ double* read_config (char* file, char* number) {
 	attr_write_id	= H5Aopen(dataset_id, "Writeouts", H5P_DEFAULT);
 
 	// read the attributes
-	status			= H5Aread(attr_N_id, H5T_NATIVE_INT, &N);
+	status			= H5Aread(attr_N_id, H5T_NATIVE_INT, N);
 	status			= H5Aread(attr_write_id, H5T_NATIVE_INT, &writes);
 
 	// try to get memory from the system
-	config = malloc(2*N*sizeof(double));
+	config = malloc(2* *N *sizeof(double));
 
 	// check which configuration to open from file
 	if 		(strncmp(number, "first", 5) == 0)
@@ -47,7 +51,7 @@ double* read_config (char* file, char* number) {
 
 		// offset and dimension of a hyperslab
 	hsize_t	offset[2]	= {step, 0};
-	hsize_t	slabdim[2]	= {1, 2*N};
+	hsize_t	slabdim[2]	= {1, 2* *N};
 
 	// get the data space of the current dataset and initialize a buffer for reading data
 	dataspace_id	= H5Dget_space(dataset_id);

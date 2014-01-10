@@ -92,7 +92,6 @@ int graphicOutput (char* file, char* read) {
 	// create everything we need to show the simulation
 	SDL_Surface	*screen, *ball_even, *ball_uneven;
 	SDL_Rect	dst;
-	SDL_Event	event;
 
 	// initiate the SDL video mode, terminate if there was an error
 	if ((SDL_Init(SDL_INIT_VIDEO)) == -1) {

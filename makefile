@@ -28,3 +28,10 @@ all:
 	@echo ' '
 	@echo ' '
 	$(MAKE) -C Pictures/ all	
+
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	$(MAKE) -C Analysis/ all
