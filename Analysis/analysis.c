@@ -5,6 +5,10 @@
 
 #include "hdf5_read.h"
 #include "picture.h"
+#include "sort.h"
+
+#define	cutoff_psi_4 0.9;
+#define	cutoff_psi_6 0.9;
 
 // basic variables
 static double* 	config;
@@ -57,41 +61,15 @@ int compute_psi4 () {
 			r_sq = dx*dx + dy*dy;
 
 			// continue if distance is too great
-			if (r_sq > 9)
+			if (r_sq > 5)
 				continue;
 
 			// order the distance and particle index within their respective lists
 			if (r_sq < dist[3]) {
-				if (r_sq < dist[2]) {
-					if (r_sq < dist[1]) {
-						if (r_sq < dist[0]) {
-							dist[3] = dist[2];
-							dist[2] = dist[1];
-							dist[1] = dist[0];
-							dist[0] = r_sq;
+				dist[3] = r_sq;
+				next[3] = j;
 
-							next[0] = j;
-						} 
-						else {
-							dist[3] = dist[2];
-							dist[2] = dist[1];
-							dist[1] = r_sq;
-
-							next[1] = j;
-						}
-					}
-					else {
-						dist[3] = dist[2];
-						dist[2] = r_sq;
-
-						next[2] = j;
-					}
-				}
-				else {
-					dist[3] = r_sq;
-
-					next[3] = j;
-				}
+				bubble_sort(dist, next, 4);
 			}
 		}
 
@@ -168,59 +146,10 @@ int compute_psi6() {
 
 			// order the distance and particle index within their respective lists
 			if (r_sq < dist[5]) {
-				if (r_sq < dist[4]) {
-					if (r_sq < dist[3]) {
-						if (r_sq < dist[2]) {
-							if (r_sq < dist[1]) {
-								if (r_sq < dist[0]) {
-									dist[5] = dist[4];
-									dist[4] = dist[3];
-									dist[3] = dist[2];
-									dist[2] = dist[1];
-									dist[1] = dist[0];
-									dist[0] = r_sq;
+				dist[5] = r_sq;
+				next[5] = j;
 
-									next[0] = j;
-								} 
-								else {
-									dist[5] = dist[4];
-									dist[4] = dist[3];
-									dist[3] = dist[2];
-									dist[2] = dist[1];
-									dist[1] = r_sq;
-
-									next[1] = j;
-								}
-							}
-							else {
-								dist[5] = dist[4];
-								dist[4] = dist[3];
-								dist[3] = dist[2];
-								dist[2] = r_sq;
-
-								next[2] = j;
-							}
-						}
-						else {
-							dist[5] = dist[4];
-							dist[4] = dist[3];
-							dist[3] = r_sq;
-
-							next[3] = j;
-						}
-					}
-					else {
-						dist[5] = dist[4];
-						dist[4] = r_sq;
-
-						next[4] = j;
-					}
-				}
-				else {
-					dist[5] = r_sq;
-
-					next[5] = j;
-				}
+				bubble_sort(dist, next, 6);
 			}
 		}
 
