@@ -5,7 +5,7 @@
 
 
 /*----------------------------------------------------------------------------------------------------------------------------*/
-int graphicOutput (char* file, double* config, double* psi_4, double* psi_6, int N) {
+int graphicOutput (char* file, double* config, int* psi_4, int* psi_6, int N, int counter_4, int counter_6) {
 
 	// basic variables
 	double dx, dy;
@@ -103,22 +103,51 @@ int graphicOutput (char* file, double* config, double* psi_4, double* psi_6, int
 			SDL_BlitSurface(ball_uneven, NULL, screen, &dst_uneven);
 	}
 
-	// draw the objects having to do with Psi 4 and Psi 6 values
-	for (int i=0; i<N; i++) {
+	// basic variables
+	int k;
 
-		// invert the y axis, otherwise (0,0) would be in the top left corner
-		posY = -config[2*i+1]+L;
+	// draw the objects determined by the Psi 4 algorithm
+	for (int i=0; i<counter_4; i++) {
 
-		// compute x and y position of each dot
-		dst_psi_4.x = round((config[2*i]/L)  *scrWidth -psi_4_ball->w/2.);
-		dst_psi_6.x = round((config[2*i]/L)  *scrWidth -psi_6_ball->w/2.);
+		// iterate over all 5 relevant particles
+		for (int j=0; j<5; j++) {
+			k = psi_4[5*i + j];
 
-		dst_psi_4.y = round((posY/L)*scrHeight-psi_4_ball->h/2.);
-		dst_psi_6.y = round((posY/L)*scrHeight-psi_6_ball->h/2.);
+			// invert the y axis, otherwise (0,0) would be in the top left corner
+			posY = -config[2*k+1]+L;
 
-		// decide whether any dot needs a special coloring
-		if (psi_4[i] > 0.9 || psi_6[i] > 0.9) {
-			if (i%2 == 0)
+			// compute x and y position of each dot
+			dst_psi_4.x = round((config[2*k]/L)  *scrWidth -psi_4_ball->w/2.);
+			dst_psi_6.x = round((config[2*k]/L)  *scrWidth -psi_6_ball->w/2.);
+
+			dst_psi_4.y = round((posY/L)*scrHeight-psi_4_ball->h/2.);
+			dst_psi_6.y = round((posY/L)*scrHeight-psi_6_ball->h/2.);
+
+			if (k%2 == 0)
+				SDL_BlitSurface(psi_6_ball, NULL, screen, &dst_psi_6);
+			else
+				SDL_BlitSurface(psi_4_ball, NULL, screen, &dst_psi_4);
+		}
+	}
+
+	// draw the objects determined by the Psi 6 algorithm
+	for (int i=0; i<counter_6; i++) {
+
+		// iterate over all 5 relevant particles
+		for (int j=0; j<7; j++) {
+			k = psi_6[7*i + j];
+
+			// invert the y axis, otherwise (0,0) would be in the top left corner
+			posY = -config[2*k+1]+L;
+
+			// compute x and y position of each dot
+			dst_psi_4.x = round((config[2*k]/L)  *scrWidth -psi_4_ball->w/2.);
+			dst_psi_6.x = round((config[2*k]/L)  *scrWidth -psi_6_ball->w/2.);
+
+			dst_psi_4.y = round((posY/L)*scrHeight-psi_4_ball->h/2.);
+			dst_psi_6.y = round((posY/L)*scrHeight-psi_6_ball->h/2.);
+
+			if (k%2 == 0)
 				SDL_BlitSurface(psi_6_ball, NULL, screen, &dst_psi_6);
 			else
 				SDL_BlitSurface(psi_4_ball, NULL, screen, &dst_psi_4);

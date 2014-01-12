@@ -5,11 +5,11 @@ NAME    := ../analysis
 LIBS    := -lm -lhdf5 -lSDL
 
 # call the gnu C compiler
-all: analysis.o hdf5.o picture.o
+all: analysis.o hdf5.o picture.o assist.o
 	@echo ' '
 	@echo '--------------------------------------------------------------------------------------------------------------------------------------'
 	@echo 'Invoking: $(CC) C Linker'
-	$(CC) -o $(NAME) analysis.o hdf5.o picture.o $(LIBS)
+	$(CC) -o $(NAME) analysis.o hdf5.o picture.o assist.o $(LIBS)
 	@echo 'Finished building: '$(NAME)
 	@echo ' '
 
@@ -28,3 +28,6 @@ hdf5.o:	hdf5_read.c
 
 picture.o: picture.c
 	$(CC) $(CFLAGS) -o picture.o picture.c
+
+assist.o: assist.c
+	$(CC) $(CFLAGS) -o assist.o assist.c

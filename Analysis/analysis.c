@@ -5,17 +5,19 @@
 
 #include "hdf5_read.h"
 #include "picture.h"
-#include "sort.h"
+#include "assist.h"
 
-#define	cutoff_psi_4 0.9;
-#define	cutoff_psi_6 0.9;
+#define	cutoff_psi_4 0.9
+#define	cutoff_psi_6 0.9
 
 // basic variables
 static double* 	config;
-static double* 	psi4;
-static double* 	psi6;
+static int* 	psi4;
+static int* 	psi6;
 
 static int		N;
+static int 		counter_4 = 0;
+static int 		counter_6 = 0;
 
 
 
@@ -31,15 +33,17 @@ int compute_psi4 () {
 	double 	dist[4] = {1E6, 1E6, 1E6, 1E6};
 	int		next[4];
 
+	int		length  = 1;
+
 	// allocate the necessary memory, check if successful
-	psi4 = malloc(N*sizeof(double));
+	psi4 = malloc(5*sizeof(int));
 
 	if (psi4 == NULL) {
 		return EXIT_FAILURE;
 	}
 
 	// iterate over all particles
-	for (int i=0; i<N; i++) {
+	for (int i=1; i<N; i+=2) {
 
 		// reinitiate both lists
 		for (int k=0; k<4; k++) {
@@ -48,7 +52,7 @@ int compute_psi4 () {
 		}
 
 		// get the four shortest distances to particle i
-		for (int j=0; j<N; j++) {
+		for (int j=0; j<N; j+=2) {
 
 			// ignore i=j
 			if (i == j) 
@@ -73,25 +77,31 @@ int compute_psi4 () {
 			}
 		}
 
-		// initiate real and imaginary part
-		real = 0;
-		img  = 0;
+		// calculate psi 4 value and check whether it shall be accepted
+		if (psi_n(4, i, config, next) > cutoff_psi_4) {
 
-		// iterate over the four saved particles
-		for (int k=0; k<4; k++) {
-			dx = config[2*next[k]] 	 - config[2*i];
-			dy = config[2*next[k]+1] - config[2*i+1];
+			// check whether there is enough space in the list
+			if (counter_4 >= length) {
 
-			theta	 = atan(dy/dx);
-			real	+= cos(4*theta);
-			img 	+= sin(4*theta);
+				// double the length of the array
+				length *= 2;
+
+				// list is too short, reallocate memory
+				psi4 = realloc(psi4, length*5*sizeof(int));
+
+			}
+
+			// save the particle i
+			psi4[5*counter_4] = i;
+
+			// save nearest neighbors
+			for (int k=0; k<4; k++) {
+				psi4[5*counter_4 + (k+1)] = next[k];
+			}
+
+			// increment counter
+			counter_4++;
 		}
-
-		// normalize real and imaginary part and calculate absolute value
-		real /= 4.0;
-		img  /= 4.0;
-
-		psi4[i] = sqrt(real*real + img*img);
 	}
 
 	// return to caller
@@ -111,24 +121,26 @@ int compute_psi6() {
 	double 	dist[6] = {1E6, 1E6, 1E6, 1E6, 1E6, 1E6};
 	int		next[6];
 
+	int		length  = 1;
+
 	// allocate the necessary memory, check if successful
-	psi6 = malloc(N*sizeof(double));
+	psi6 = malloc(7*sizeof(int));
 
 	if (psi6 == NULL) {
 		return EXIT_FAILURE;
 	}
 
 	// iterate over all particles
-	for (int i=0; i<N; i++) {
+	for (int i=0; i<N; i+=2) {
 
 		// reinitiate both lists
-		for (int k=0; k<4; k++) {
+		for (int k=0; k<6; k++) {
 			dist[k] = 1E6;
 			next[k] = N;
 		}
 
 		// get the four shortest distances to particle i
-		for (int j=0; j<N; j++) {
+		for (int j=0; j<N; j+=2) {
 
 			// ignore i=j
 			if (i == j) 
@@ -141,7 +153,7 @@ int compute_psi6() {
 			r_sq = dx*dx + dy*dy;
 
 			// continue if distance is too great
-			if (r_sq > 9)
+			if (r_sq > 5)
 				continue;
 
 			// order the distance and particle index within their respective lists
@@ -153,25 +165,31 @@ int compute_psi6() {
 			}
 		}
 
-		// initiate real and imaginary part
-		real = 0;
-		img  = 0;
+		// calculate psi 6 value and check whether it shall be accepted
+		if (psi_n (6, i, config, next) > cutoff_psi_6) {
 
-		// iterate over the four saved particles
-		for (int k=0; k<6; k++) {
-			dx = config[2*next[k]] 	 - config[2*i];
-			dy = config[2*next[k]+1] - config[2*i+1];
+			// check whether there is enough space in the list
+			if (counter_6 >= length) {
 
-			theta	 = atan(dy/dx);
-			real	+= cos(6*theta);
-			img 	+= sin(6*theta);
+				// double the length of the array
+				length *= 2;
+
+				// list is too short, reallocate memory
+				psi6 = realloc(psi6, length*7*sizeof(int));
+
+			}
+
+			// save the particle i
+			psi6[7*counter_6] = i;
+
+			// save nearest neighbors
+			for (int k=0; k<6; k++) {
+				psi6[7*counter_6 + (k+1)] = next[k];
+			}
+
+			// increment counter
+			counter_6++;
 		}
-
-		// normalize real and imaginary part and calculate absolute value
-		real /= 6.0;
-		img  /= 6.0;
-
-		psi6[i] = sqrt(real*real + img*img);
 	}
 
 	// return to caller
@@ -223,7 +241,7 @@ int main (int argcount, char** argvektor) {
 	length 	= strlen(argvektor[1]);
 	strncat(file, "__analysis.bmp", 1024-length);
 
-	if ((check = graphicOutput (file, config, psi4, psi6, N)) != EXIT_SUCCESS) {
+	if ((check = graphicOutput (file, config, psi4, psi6, N, counter_4, counter_6)) != EXIT_SUCCESS) {
 		return EXIT_FAILURE;
 	}
 
