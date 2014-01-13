@@ -1,13 +1,10 @@
-# define output name
-NAME 	:= ../graphic
+# name the resulting program
+NAME    := ../../Work/builder
 
-# define necessary libraries
-LIBS 	:= -lm -lhdf5 -lSDL
-
-all: simulation.o
+all:	main.o
 	@echo '--------------------------------------------------------------------------------------------------------------------------------------'
 	@echo 'Invoking: GCC C Linker'
-	$(CC) simulation.o -o $(NAME) $(LIBS)
+	$(CC) -o $(NAME) main.o
 	@echo 'Finished building: '$(NAME)
 	@echo ' '
 
@@ -16,8 +13,8 @@ all: simulation.o
 	rm -rf *.o
 	@echo ' '
 
-simulation.o: simulation_gui.c
+main.o: config_builder.c
 	@echo '--------------------------------------------------------------------------------------------------------------------------------------'
 	@echo 'Invoking: GCC C Compiler'
-	$(CC) $(CFLAGS) -o simulation.o simulation_gui.c
+	$(CC) $(CFLAGS) -o main.o config_builder.c
 	@echo ' '

@@ -1,5 +1,5 @@
 # name the resulting program
-NAME    := ../simulation
+NAME    := ../../Work/simulation
 
 # include the necessary libraries and determine basic parameters
 LIBS    := -lm -lpthread -lhdf5

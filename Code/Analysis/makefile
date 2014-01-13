@@ -1,5 +1,5 @@
 # name the resulting program
-NAME    := ../analysis
+NAME    := ../../Work/analysis
 
 # include the necessary libraries and determine basic parameters
 LIBS    := -lm -lhdf5 -lSDL

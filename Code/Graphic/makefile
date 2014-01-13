@@ -1,13 +1,13 @@
 # define output name
-NAME 	:= ../picture
+NAME 	:= ../../Work/graphic
 
-# define necessary libraries and basic parameters
+# define necessary libraries
 LIBS 	:= -lm -lhdf5 -lSDL
 
-all: picture.o
+all: simulation.o
 	@echo '--------------------------------------------------------------------------------------------------------------------------------------'
 	@echo 'Invoking: GCC C Linker'
-	$(CC) picture.o -o $(NAME) $(LIBS)
+	$(CC) simulation.o -o $(NAME) $(LIBS)
 	@echo 'Finished building: '$(NAME)
 	@echo ' '
 
@@ -16,8 +16,8 @@ all: picture.o
 	rm -rf *.o
 	@echo ' '
 
-picture.o: picturemaker.c
+simulation.o: simulation_gui.c
 	@echo '--------------------------------------------------------------------------------------------------------------------------------------'
 	@echo 'Invoking: GCC C Compiler'
-	$(CC) $(CFLAGS) -o picture.o picturemaker.c
+	$(CC) $(CFLAGS) -o simulation.o simulation_gui.c
 	@echo ' '
