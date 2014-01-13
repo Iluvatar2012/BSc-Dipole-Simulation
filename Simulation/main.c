@@ -179,6 +179,11 @@ int main(int argcount, char** argvektor) {
 		strncpy(infile, argvektor[1], length);
 		sim_number = atoi(argvektor[2]);
 		init_positions = read_configuration(argvektor[3]);
+
+		// return with a failure if the specified array could not be read
+		if (init_positions == NULL) 
+			return EXIT_FAILURE;
+
 	} else if (argcount == 3) {
 		strncpy(infile, argvektor[1], length);
 		sim_number = atoi(argvektor[2]);
