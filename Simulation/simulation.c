@@ -175,23 +175,6 @@ int init(struct sim_struct *param, double* init_positions) {
 		return EXIT_SUCCESS;
 	}
 
-	/*	// compute initial particle positions, the particles shall be placed upon an evenly spaced grid
-	double init_x = 0;
-	double init_y = 0;
-
-	for(int i=0; i<(2*N); i+=2) {
-		init_x += L/(sqrt(N));
-		if (init_x >= L) {
-			init_x = (init_x/L-(int)(init_x/L))*L;
-			init_y += L/sqrt(N);
-		}
-
-		position[i] 	= init_x;
-		position[i+1] 	= init_y;
-	}
-	*/
-
-
 	// compute initial particle positions, the particles shall be placed randomly with minimum distance criteria
 	short done;
 	double dx;
@@ -229,15 +212,6 @@ int init(struct sim_struct *param, double* init_positions) {
 	update_verlet();
 	return EXIT_SUCCESS;
 }
-
-
-
-
-
-
-
-
-
 
 
 
@@ -506,15 +480,6 @@ static void *iteration (int *no) {
 
 
 
-
-
-
-
-
-
-
-
-
 /*-------------------------------------------------------------------------------------------------------*/
 void simulation (void) {
 
@@ -552,7 +517,7 @@ void simulation (void) {
 		
 		// variable for storing the amount of data already written
 		int written;
-		if (reopen_file(position, max_timesteps/write_step, &written) == EXIT_FAILURE)
+		if (reopen_file(position, displacement, max_timesteps/write_step, &written) == EXIT_FAILURE)
 			exit(EXIT_FAILURE);
 
 		// iterate what timestep we are at
@@ -561,7 +526,7 @@ void simulation (void) {
 	}
 	else {
 		//write_file(position, timesteps, N);
-		write_data(timesteps, position);
+		write_data(timesteps, position, displacement);
 	}
 
 	// increase timestep counter
@@ -622,7 +587,7 @@ void simulation (void) {
 		// check whether parameters should be written to declared external file
 		if ((timesteps%write_step) == 0) {
 			update_verlet();
-			write_data(timesteps, position);
+			write_data(timesteps, position, displacement);
 
 			// compute percentage of program already completed
 			perc = (100.*timesteps)/max_timesteps;
@@ -663,11 +628,6 @@ void simulation (void) {
 
 	sleep(1);
 
-	// print total displacement to stdout
-	create_displacement_file (outfile, N, displacement);
-
-	fflush(stdout);
-
 	// end of simulation, free all allocated memory space
 	free(position);
 	free(force);
@@ -689,14 +649,6 @@ void simulation (void) {
 	fflush(file);
 	fclose(file);
 }
-
-
-
-
-
-
-
-
 
 
 
