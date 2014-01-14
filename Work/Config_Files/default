@@ -5,4 +5,4 @@ Particle Diffusion ratio (D_rat)	: 1.7
 Time difference (delta_t)            	: 0.000001
 Destination file (outfile)           	: Results/default.hdf5
 Iterations                           	: 1000
-Writeout step                          	: 1000
+Writeout step                          	: 10

@@ -73,3 +73,10 @@ double psi_n (int n, int i, double* config, int* next) {
 
 	return sqrt(real*real + img*img);
 }
+
+
+
+/*----------------------------------------------------------------------------------------------------------------------------*/
+double bond_length_n (int n, int i, double* config, int* next) {
+	
+}

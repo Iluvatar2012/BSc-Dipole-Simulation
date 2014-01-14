@@ -1,6 +1,6 @@
 # set standard compiler to Intel C Compiler and set Compiler Flags, export variables
 CC		:= icc
-CFLAGS	:= -c -O3 -std=c99
+CFLAGS	:= -c -O3 -std=c99 -g
 export
 
 

@@ -7,6 +7,6 @@
 *Config_Files/*
 !*Config_Files/default
 *Test/
-*Jobs/*
+*Jobs/
 *Start/*
 *analysis

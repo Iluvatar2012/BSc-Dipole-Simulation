@@ -91,7 +91,7 @@ int graphicOutput (char* file, char* read) {
 
 	// create everything we need to show the simulation
 	SDL_Surface	*screen, *ball_even, *ball_uneven;
-	SDL_Rect	dst;
+	SDL_Rect	dst_even, dst_uneven;
 
 	// initiate the SDL video mode, terminate if there was an error
 	if ((SDL_Init(SDL_INIT_VIDEO)) == -1) {
@@ -111,25 +111,25 @@ int graphicOutput (char* file, char* read) {
 	}
 
 	// get the picture of the black dot
-	ball_even = SDL_LoadBMP("Dots/Red_Dot_5x5px.bmp");
+	ball_even = SDL_LoadBMP("Dots/Red_Dot_9x9px.bmp");
 	if (ball_even == NULL) {
 		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
 		return EXIT_FAILURE;
 	}
 
 	// get the picture of the red dot
-	ball_uneven = SDL_LoadBMP("Dots/Green_Dot_3x3px.bmp");
+	ball_uneven = SDL_LoadBMP("Dots/Green_Dot_5x5px.bmp");
 	if (ball_uneven == NULL) {
 		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
 		return EXIT_FAILURE;
 	}
 
 	// get the height and width of our image, needed to blit it to screen
-	dst.w = ball_even->w;
-	dst.h = ball_even->h;
+	dst_even.w = ball_even->w;
+	dst_even.h = ball_even->h;
 
-	dst.w = ball_uneven->w;
-	dst.h = ball_uneven->h;
+	dst_uneven.w = ball_uneven->w;
+	dst_uneven.h = ball_uneven->h;
 
 	// variable for storing the step that is shall be drawn
 	int step;
@@ -140,9 +140,6 @@ int graphicOutput (char* file, char* read) {
 	// variables to hold basic values for computing absolute pixel positions
 	int	scrWidth 	= screen->w;
 	int scrHeight 	= screen->h;
-
-	double picWidth		= ball_even->w;
-	double picHeight	= ball_even->h;
 
 	double posY;
 
@@ -167,18 +164,22 @@ int graphicOutput (char* file, char* read) {
 		// invert the y axis, otherwise (0,0) would be in the top left corner
 		posY = -positions[step*2*N+2*i+1]+L;
 
-		// compute x and y position of each dot
-		dst.x = round((positions[step*2*N+2*i]/L)  *scrWidth -picWidth/2.);
-		dst.y = round((posY/L)*scrHeight-picHeight/2.);
-
-		// copy image to screen according to whether we need a red or black dot
-		if (i%2 == 0)
-			SDL_BlitSurface(ball_even, NULL, screen, &dst);
-		else
-			SDL_BlitSurface(ball_uneven, NULL, screen, &dst);
+		// copy image to screen according to whether we need a red or green dot
+		if (i%2 == 0) {
+			// compute x and y position of each even dot
+			dst_even.x = round((positions[step*2*N+2*i]/L)  *scrWidth - ball_even->w/2.);
+			dst_even.y = round((posY/L)*scrHeight - ball_even->h/2.);
+			SDL_BlitSurface(ball_even, NULL, screen, &dst_even);
+		}
+		else {
+			// compute x and y position of each uneven dot
+			dst_uneven.x = round((positions[step*2*N+2*i]/L)  *scrWidth - ball_uneven->w/2.);
+			dst_uneven.y = round((posY/L)*scrHeight - ball_uneven->h/2.);
+			SDL_BlitSurface(ball_uneven, NULL, screen, &dst_uneven);
+		}
 	}
 
-	// TRIAL: Save the last screen to file
+	// Save the screen to file
 	SDL_SaveBMP(screen, file);
 
 	// clear memory of everything cluttering it
