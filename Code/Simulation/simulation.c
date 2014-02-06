@@ -47,7 +47,6 @@ static int 	  N;
 static double L;
 static double Li;
 static double shear;
-static double shear_B;
 static double D_Brown_A;
 static double D_Brown_B;
 static double D_rat;
@@ -117,9 +116,8 @@ int init(struct sim_struct *param, double* init_positions) {
 	L 	= sqrt(N/2.);	// N_A = N/2.;
 	Li 	= 1.0/L;
 
-	// compute diffusion value of particle B, interaction relation and initialize shear rate for particles B
+	// compute diffusion value of particle B, interaction relation
 	D_Brown_B 	= D_rat*D_Brown_A;
-	shear_B		= 0;
 
 	// set values of remaining static variables
 	delta_t				= tau_B * timestep;
