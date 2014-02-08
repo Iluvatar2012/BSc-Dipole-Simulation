@@ -52,7 +52,7 @@ int compute_psi4 () {
 		}
 
 		// get the four shortest distances to particle i
-		for (int j=0; j<N; j+=2) {
+		for (int j=0; j<N; j++) {
 
 			// ignore i=j
 			if (i == j) 
@@ -79,6 +79,17 @@ int compute_psi4 () {
 
 		// calculate psi 4 value and check whether it shall be accepted
 		if (psi_n(4, i, config, next) > cutoff_psi_4) {
+
+			int break_val = 1;
+			// check whether the particle is accepted or whether one of the values is of type B
+			for (int k=0; k<4; k++) {
+				if ((next[k] % 2) == 1) {
+					break_val = 0;
+				}
+			}
+
+			if (break_val == 0)
+				continue;
 
 			// check whether there is enough space in the list
 			if (counter_4 >= length) {
@@ -140,7 +151,7 @@ int compute_psi6() {
 		}
 
 		// get the four shortest distances to particle i
-		for (int j=0; j<N; j+=2) {
+		for (int j=0; j<N; j++) {
 
 			// ignore i=j
 			if (i == j) 
@@ -167,6 +178,18 @@ int compute_psi6() {
 
 		// calculate psi 6 value and check whether it shall be accepted
 		if (psi_n (6, i, config, next) > cutoff_psi_6) {
+
+			int break_val = 1;
+			// check whether the particle is accepted or whether one of the values is of type B
+			for (int k=0; k<6; k++) {
+				if ((next[k] % 2) == 1) {
+					break_val = 0;
+					break;
+				}
+			}
+
+			if (break_val == 0)
+				continue;
 
 			// check whether there is enough space in the list
 			if (counter_6 >= length) {

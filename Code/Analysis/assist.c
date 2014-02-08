@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "assist.h"
+
 
 
 /*----------------------------------------------------------------------------------------------------------------------------*/
@@ -63,6 +65,10 @@ double psi_n (int n, int i, double* config, int* next) {
 			dy = config[2*next[k]+1] - config[2*i+1];
 
 			theta	 = atan(dy/dx);
+
+			if (dx < 0)
+				theta += PI;
+
 			real	+= cos(n*theta);
 			img 	+= sin(n*theta);
 	}
@@ -79,4 +85,36 @@ double psi_n (int n, int i, double* config, int* next) {
 /*----------------------------------------------------------------------------------------------------------------------------*/
 double bond_length_n (int n, int i, double* config, int* next) {
 	
+	// basic variables
+	double dx, dy;
+	double l_med = 0;
+	double l;
+	double b = 0;
+
+	// calculate the medium distance
+	for (int k=0; i<n; k++) {
+		dx = config[2*next[k]] 	 - config[2*i];
+		dy = config[2*next[k]+1] - config[2*i+1];
+
+		l_med += sqrt(dx*dx + dy*dy);
+	}
+
+	l_med /= n;
+
+	// calculate the bond_length_deviation
+	for (int k=0; k<n; k++) {
+		dx = config[2*next[k]] 	 - config[2*i];
+		dy = config[2*next[k]+1] - config[2*i+1];
+
+		l_med += sqrt(dx*dx + dy*dy);
+
+		b += abs(l-l_med)/l_med;
+	}
+
+	b /= n;
+
+	fprintf(stderr, "i: %d bld: %lf, x: %lf, y: %lf\n", i, b, config[2*i], config[2*i+1]);
+
+	// return to caller
+	return b;
 }

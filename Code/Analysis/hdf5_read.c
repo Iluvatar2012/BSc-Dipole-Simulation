@@ -32,7 +32,7 @@ double* read_config (char* file, char* number, int* N) {
 	// open the dataset and attributes
 	dataset_id		= H5Dopen2(file_id, "/positions", H5P_DEFAULT);
 	attr_N_id		= H5Aopen(dataset_id, "N", H5P_DEFAULT);
-	attr_write_id	= H5Aopen(dataset_id, "Writeouts", H5P_DEFAULT);
+	attr_write_id	= H5Aopen(dataset_id, "Last_Writeout", H5P_DEFAULT);
 
 	// read the attributes
 	status			= H5Aread(attr_N_id, H5T_NATIVE_INT, N);

@@ -35,10 +35,6 @@ struct sim_struct {
 	int 	struct_N;
 	int		struct_thread_number;
 
-	double	struct_kT;
-	double	struct_tau_B;
-	double 	struct_D_Brown_A;
-
 	// variable parameters set by the user
 	double	Gamma_A;
 	double 	m;

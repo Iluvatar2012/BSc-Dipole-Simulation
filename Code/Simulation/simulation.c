@@ -86,10 +86,6 @@ int init(struct sim_struct *param, double* init_positions) {
 	N 				= param->struct_N;
 	thread_number	= param->struct_thread_number;
 
-	kT				= param->struct_kT;
-	tau_B			= param->struct_tau_B;
-	D_Brown_A		= param->struct_D_Brown_A;
-
 	Gamma_A			= param->Gamma_A;
 	m 				= param->m;
 	shear 			= param->shear;

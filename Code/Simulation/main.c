@@ -141,10 +141,6 @@ struct sim_struct *make_sim_struct () {
 	sim->struct_N 					= N;
 	sim->struct_thread_number		= thread_number;
 
-	sim->struct_kT					= kT;
-	sim->struct_tau_B				= tau_B;
-	sim->struct_D_Brown_A			= D_Brown_A;
-
 	sim->Gamma_A			= Gamma_A;
 	sim->m 					= m;
 	sim->shear 				= shear;
