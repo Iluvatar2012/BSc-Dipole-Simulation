@@ -157,7 +157,7 @@ int builder (double D_rat, double Gamma_A, double shear, int no) {
 
 	// append the dipole relation Gamma
 	strncat(outfile, "__GammaA_", 9);
-	sprintf(buf, "%.0lf", Gamma_A);
+	sprintf(buf, "%.1lf", Gamma_A);
 	strncat(outfile, buf, 64);
 
 	// append the shear rate
