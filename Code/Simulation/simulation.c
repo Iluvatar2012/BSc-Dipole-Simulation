@@ -1,5 +1,13 @@
 #define _GNU_SOURCE
 
+// define constants of the simulation
+#define 	N 					1000
+#define		thread_number		8
+
+#define 	kT					1.0
+#define		tau_B				1.0
+#define		D_Brown_A			1.0
+
 // standard header files
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,7 +41,6 @@ static int 	  write_step;
 static int 	  sim_number;
 
 // Particle properties
-static double kT;
 static double Gamma_A;
 static double m;
 
@@ -43,15 +50,11 @@ static double* position;
 static double* displacement;
 
 // System properties
-static int 	  N;
 static double L;
 static double Li;
 static double shear;
-static double shear_B;
-static double D_Brown_A;
 static double D_Brown_B;
 static double D_rat;
-static double tau_B;
 static double weigh_brown_A;
 static double weigh_brown_B;
 
@@ -69,7 +72,6 @@ static double  force_cutoff;
 static char 	outfile[1024];
 static int* 	borders;
 static int* 	numbers;
-static int 		thread_number;
 static short 	cont;
 
 static pthread_t* 			threads;
@@ -83,9 +85,6 @@ static pthread_barrier_t 	barrier_internal;
 int init(struct sim_struct *param, double* init_positions) {
 
 	// copy values from incoming struct
-	N 				= param->struct_N;
-	thread_number	= param->struct_thread_number;
-
 	Gamma_A			= param->Gamma_A;
 	m 				= param->m;
 	shear 			= param->shear;
@@ -108,14 +107,12 @@ int init(struct sim_struct *param, double* init_positions) {
     time(&t);
     srand((unsigned int)t);
 
-	// compute Boxlength from a = sqrt(L²/(PI*N_A)) = 1, or, more inaccurately, narrow a as side of a box so that: a = sqrt(L²/N_A) = 1
-//	L = sqrt(PI*N_A);
+	// compute Boxlength, narrow a as side of a box so that: a = sqrt(L²/N_A) = 1
 	L 	= sqrt(N/2.);	// N_A = N/2.;
 	Li 	= 1.0/L;
 
-	// compute diffusion value of particle B, interaction relation and initialize shear rate for particles B
-	D_Brown_B 	= D_rat*D_Brown_A;
-	shear_B		= 0;
+	// compute diffusion value of particle B
+	D_Brown_B 			= D_rat*D_Brown_A;
 
 	// set values of remaining static variables
 	delta_t				= tau_B * timestep;

@@ -31,10 +31,6 @@ struct parameters {
 // define a struct for handing parameters to the simulation
 struct sim_struct {
 
-	// relatively stable parameters
-	int 	struct_N;
-	int		struct_thread_number;
-
 	// variable parameters set by the user
 	double	Gamma_A;
 	double 	m;

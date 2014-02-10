@@ -57,16 +57,6 @@
 /*-------------------------------------------------------------------------------------------------------*/
 #define _GNU_SOURCE
 
-// define basic variables
-#define 	N 					1000
-#define		thread_number		8
-
-#define 	kT					1.0
-#define		tau_B				1.0
-#define		D_Brown_A			1.0
-
-
-
 // Standard header files
 #include <stdio.h>
 #include <stdlib.h>
@@ -138,9 +128,6 @@ struct sim_struct *make_sim_struct () {
 	struct sim_struct *sim = malloc(sizeof(struct sim_struct));
 
 	// copy simple variables to struct
-	sim->struct_N 					= N;
-	sim->struct_thread_number		= thread_number;
-
 	sim->Gamma_A			= Gamma_A;
 	sim->m 					= m;
 	sim->shear 				= shear;
