@@ -52,7 +52,7 @@ static double* displacement;
 // System properties
 static double L;
 static double Li;
-static double shear;
+static double v_s;
 static double D_Brown_B;
 static double D_rat;
 static double weigh_brown_A;
@@ -87,7 +87,7 @@ int init(struct sim_struct *param, double* init_positions) {
 	// copy values from incoming struct
 	Gamma_A			= param->Gamma_A;
 	m 				= param->m;
-	shear 			= param->shear;
+	v_s 			= param->shear;
 	D_rat			= param->D_rat;
 
 	timestep 		= param->timestep;
@@ -251,10 +251,6 @@ static void *iteration (int *no) {
 
 		D_kT_one = D_Brown_A/kT;
 		D_kT_two = D_Brown_B/kT;
-
-		// set shear value according to particle index
-		shear_one = shear * kT/D_Brown_A;
-		shear_two = shear * kT/D_Brown_B;
 	}
 	else {
 		// get the relation of all even values, this is basically the interaction relation this particle will have with other particles
@@ -267,11 +263,10 @@ static void *iteration (int *no) {
 
 		D_kT_one = D_Brown_B/kT;
 		D_kT_two = D_Brown_A/kT;
-
-		// set shear value according to particle index
-		shear_one = shear * kT/D_Brown_B;
-		shear_two = shear * kT/D_Brown_A;
 	}
+
+	shear_one = v_s / (D_kT_one * L) * delta_t;
+	shear_two = v_s / (D_kT_two * L) * delta_t;
 
 	// let the simulation run until the thread is terminated
 	while(cont == 1) {
@@ -377,7 +372,7 @@ static void *iteration (int *no) {
 			g2 = temp*sin(TWO_PI*u2);
 
 			// Calculate next positions and total displacement for all particles
-			dx = D_kT_one*delta_t*(force[2*i] + position[2*i+1]/L*shear_one) + weigh_brown_one*g1;
+			dx = D_kT_one*delta_t*force[2*i]   + weigh_brown_one * g1 + position[2*i+1]*shear_one;
 			dy = D_kT_one*delta_t*force[2*i+1] + weigh_brown_one * g2;
 
 			position[2*i]		+= dx;
@@ -398,14 +393,14 @@ static void *iteration (int *no) {
 			}
 
 			// transpose particle from laboratory system S into moving system S'
-			position[2*i]	-= shear * position[2*i+1]/L*t_passed;
+			position[2*i]	-= v_s * position[2*i+1]/L*t_passed;
 
 			// Calculate x and y positions with periodic boundary conditions in S'
 			position[2*i] 	-= floor(position[2*i]/L)*L;
 			position[2*i+1] -= floor(position[2*i+1]/L)*L;
 
 			// transpose particle back from S' to S
-			position[2*i]	+= shear * position[2*i+1]/L*t_passed;
+			position[2*i]	+= v_s * position[2*i+1]/L*t_passed;
 		}
 
 		// compute new positions for particles B from forces, remember periodic boundary conditions
@@ -427,7 +422,7 @@ static void *iteration (int *no) {
 			g2 = temp*sin(TWO_PI*u2);
 
 			// Calculate next positions and total displacement for all particles
-			dx = D_kT_two*delta_t*(force[2*i] + position[2*i+1]/L*shear_two) + weigh_brown_two*g1;
+			dx = D_kT_two*delta_t*force[2*i]   + weigh_brown_two * g1 + position[2*i+1]*shear_two;
 			dy = D_kT_two*delta_t*force[2*i+1] + weigh_brown_two * g2;
 
 			position[2*i]		+= dx;
@@ -448,14 +443,14 @@ static void *iteration (int *no) {
 			}
 
 			// transpose particle from laboratory system S into moving system S'
-			position[2*i]	-= shear * position[2*i+1]/L*t_passed;
+			position[2*i]	-= v_s * position[2*i+1]/L*t_passed;
 
 			// Calculate x and y positions with periodic boundary conditions in S'
 			position[2*i] 	-= floor(position[2*i]/L)*L;
 			position[2*i+1] -= floor(position[2*i+1]/L)*L;
 
 			// transpose particle back from S' to S
-			position[2*i]	+= shear * position[2*i+1]/L*t_passed;
+			position[2*i]	+= v_s * position[2*i+1]/L*t_passed;
 		}
 
 		// increase time passed
@@ -552,7 +547,7 @@ void simulation (void) {
 	time_string = ctime(&init_time);
 
 	fprintf(file, "Starting simulation ID: %d at %s"
-					"Parameters N: %d, m: %.2lf, Gamma: %.0lf, Shear: %.0lf, Steps: %d\n\n", sim_number, time_string, N, m, Gamma_A, shear, max_timesteps);
+					"Parameters N: %d, m: %.2lf, Gamma: %.0lf, Shear: %.0lf, Steps: %d\n\n", sim_number, time_string, N, m, Gamma_A, v_s, max_timesteps);
 	fflush(file);
 
 	// iterate over all timesteps
@@ -638,7 +633,7 @@ void simulation (void) {
 
 	fprintf(file, "\n\nFinished simulation ID: %d at %s"
 					"Parameters N: %d, m: %.2lf, Gamma: %.0lf, Shear: %.0lf, Steps: %d\n"
-					"Elapsed time: %d seconds\n\n", sim_number, time_string, N, m, Gamma_A, shear, max_timesteps, (int)(current_time - init_time));
+					"Elapsed time: %d seconds\n\n", sim_number, time_string, N, m, Gamma_A, v_s, max_timesteps, (int)(current_time - init_time));
 	fflush(file);
 	fclose(file);
 }
