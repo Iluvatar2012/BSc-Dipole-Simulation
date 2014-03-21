@@ -33,9 +33,11 @@ static double cutoff;
 static double cutoff_squared;
 
 static double delta_t;
-static double t_passed;
 static double timestep;
 static int	  max_timesteps;
+
+static double box_A;
+static double box_B;
 
 static int 	  write_step;
 static int 	  sim_number;
@@ -53,6 +55,9 @@ static double* displacement;
 static double L;
 static double Li;
 static double v_s;
+static double v_A;
+static double v_B;
+
 static double D_Brown_B;
 static double D_rat;
 static double weigh_brown_A;
@@ -95,6 +100,12 @@ int init(struct sim_struct *param, double* init_positions) {
 	write_step		= param->write_step;
 	sim_number		= param->sim_number;
 
+	// check whether particle species orientation is correct
+	if (D_rat < 1) {
+		fprintf(stderr, "Value D_rat is smaller than 1.0, consider switching particle species properties. D_rat: %lf1.3\n", D_rat);
+		return EXIT_FAILURE;
+	}
+
 	// copy filename to write to
 	strncpy(outfile, param->outfile, 1024);
 
@@ -111,15 +122,19 @@ int init(struct sim_struct *param, double* init_positions) {
 	L 	= sqrt(N/2.);	// N_A = N/2.;
 	Li 	= 1.0/L;
 
-	// compute diffusion value of particle B
+	// compute diffusion value of particle B, compute box speeds for particles A and B
 	D_Brown_B 			= D_rat*D_Brown_A;
+	v_A					= v_s/D_Brown_A*kT;
+	v_B					= v_s/D_Brown_B*kT;
 
 	// set values of remaining static variables
 	delta_t				= tau_B * timestep;
-	t_passed			= 0;
 
 	weigh_brown_A 		= sqrt(2.0 * D_Brown_A * delta_t);
 	weigh_brown_B 		= sqrt(2.0 * D_Brown_B * delta_t);
+
+	box_A				= 0;
+	box_B				= 0;
 
 	cutoff 				= (L/2.0);
 	cutoff_squared 		= cutoff*cutoff;
@@ -212,7 +227,7 @@ int init(struct sim_struct *param, double* init_positions) {
 static void *iteration (int *no) {
 	// Define necessary variables
 	double xi, xj, yi, yj;
-	double dx, dy;
+	double dx, dy, sig_y;
 	double r_squared;
 
 	double temp_force;
@@ -238,6 +253,9 @@ static void *iteration (int *no) {
 	double shear_one;
 	double shear_two;
 
+	double box_one;
+	double box_two;
+
 	double m_j;
 
 	if (min%2 == 0){
@@ -251,6 +269,10 @@ static void *iteration (int *no) {
 
 		D_kT_one = D_Brown_A/kT;
 		D_kT_two = D_Brown_B/kT;
+
+		// assign the right box displacement parameter
+		*box_one = *box_A;
+		*box_two = *box_B;
 	}
 	else {
 		// get the relation of all even values, this is basically the interaction relation this particle will have with other particles
@@ -263,6 +285,10 @@ static void *iteration (int *no) {
 
 		D_kT_one = D_Brown_B/kT;
 		D_kT_two = D_Brown_A/kT;
+
+		// assign the right box displacement parameter
+		*box_one = *box_B;
+		*box_two = *box_A;
 	}
 
 	shear_one = v_s / (D_kT_one * L) * delta_t;
@@ -297,9 +323,13 @@ static void *iteration (int *no) {
 				dx = xi - xj;
 				dy = yi - yj;
 
-				// find images through altering dx and dy
-				dx -= dround(dx*Li) * L;
-				dy -= dround(dy*Li) * L;
+				// alter dx, this accounts for Lees-Edwards conditions
+				sig_y 	=  dround(dy*Li);
+				dx 		+= sig_y * (box_one);
+
+ 				// find images through altering dx and dy
+				dx -= dround(dx*Li)*L;
+				dy -= sig_y * L;
 
 				// get square of distance and compute force in x and y direction
 				r_squared = dx*dx + dy*dy;
@@ -337,9 +367,13 @@ static void *iteration (int *no) {
 				dx = xi - xj;
 				dy = yi - yj;
 
-				// find images through altering dx and dy
-				dx -= dround(dx*Li) * L;
-				dy -= dround(dy*Li) * L;
+				// alter dx, this accounts for Lees-Edwards conditions
+				sig_y 	=  dround(dy*Li);
+				dx 		+= sig_y * (box_two);
+
+ 				// find images through altering dx and dy
+				dx -= dround(dx*Li)*L;
+				dy -= sig_y * L;
 
 				// get square of distance and compute force in x and y direction
 				r_squared = dx*dx + dy*dy;
@@ -392,15 +426,12 @@ static void *iteration (int *no) {
 				verlet_max[2*(*no)+1] = temp;
 			}
 
-			// transpose particle from laboratory system S into moving system S'
-			position[2*i]	-= v_s * position[2*i+1]/L*t_passed;
+			// Calculate x positions with periodic boundary conditions, check whether the particle moved from one row to another
+			position[2*i] 	-= floor(position[2*i]*Li)*L;
+			position[2*i]	-= (floor((position[2*i+1]+L)*Li)-1)*(box_one);
 
-			// Calculate x and y positions with periodic boundary conditions in S'
-			position[2*i] 	-= floor(position[2*i]/L)*L;
-			position[2*i+1] -= floor(position[2*i+1]/L)*L;
-
-			// transpose particle back from S' to S
-			position[2*i]	+= v_s * position[2*i+1]/L*t_passed;
+			// Calculate y positions with periodic boundary conditions
+			position[2*i+1] -= floor(position[2*i+1]*Li)*L;
 		}
 
 		// compute new positions for particles B from forces, remember periodic boundary conditions
@@ -442,19 +473,13 @@ static void *iteration (int *no) {
 				verlet_max[2*(*no)+1] = temp;
 			}
 
-			// transpose particle from laboratory system S into moving system S'
-			position[2*i]	-= v_s * position[2*i+1]/L*t_passed;
+			// Calculate x positions with periodic boundary conditions, check whether the particle moved from one row to another
+			position[2*i] 	-= floor(position[2*i]*Li)*L;
+			position[2*i]	-= (floor((position[2*i+1]+L)*Li)-1)*(box_two);
 
-			// Calculate x and y positions with periodic boundary conditions in S'
-			position[2*i] 	-= floor(position[2*i]/L)*L;
-			position[2*i+1] -= floor(position[2*i+1]/L)*L;
-
-			// transpose particle back from S' to S
-			position[2*i]	+= v_s * position[2*i+1]/L*t_passed;
+			// Calculate y positions with periodic boundary conditions
+			position[2*i+1] -= floor(position[2*i+1]*Li)*L;
 		}
-
-		// increase time passed
-		t_passed += delta_t;
 
 		// Signal to main thread, that all threads have finished their iteration
 		pthread_barrier_wait(&barrier_main_one);
@@ -513,7 +538,6 @@ void simulation (void) {
 		fprintf(file, "Timestep: %d\n", timesteps);
 	}
 	else {
-		//write_file(position, timesteps, N);
 		write_data(timesteps, position, displacement);
 	}
 
@@ -565,6 +589,18 @@ void simulation (void) {
 			}
 		}
 
+		// adjust orientation of upper and lower box row for both particle species
+		box_A += v_A*delta_t;
+		box_B += v_B*delta_t;
+
+		// readjust box_A orientation when necessary
+		if ((box_A - box_B) > 0.5)
+			box_A -= 1;
+
+		// implement periodic boundary conditions
+		box_A -= floor(box_A*Li)*L;
+		box_B -= floor(box_B*Li)*L;
+
 		// check if verlet list has to be updated
 		if ((verlet_max_1+verlet_max_2) > d_cutoff_verlet) {
 			update_verlet();
@@ -574,7 +610,6 @@ void simulation (void) {
 
 		// check whether parameters should be written to declared external file
 		if ((timesteps%write_step) == 0) {
-			update_verlet();
 			write_data(timesteps, position, displacement);
 
 			// compute percentage of program already completed
@@ -644,18 +679,11 @@ void simulation (void) {
 void update_verlet (void) {
 	// define necessary variables: i, j and temporary position variables,
 	double xi, yi, xj, yj;
-	double dx, dy;
+	double dx, dy, sig_y;
 	double r_squared;
 
 	// count how many values there are in the list
 	int k;
-
-	// reset time counter and reset all particles to have the original square layout
-	t_passed = 0;
-
-	for (int i=0; i<N; i++) {
-		position[2*i] 	-= floor(position[2*i]/L)*L;
-	}
 
 	// iterate over all particles, read positions
 	for (int i=0; i<N; i++) {
@@ -665,7 +693,12 @@ void update_verlet (void) {
 		// save the amount of neighbors to particle i in k
 		k = 0;
 
-		for (int j=0; j<i; j++) {
+		for (int j=0; j<N; j+=2) {
+
+			// ignore entry where particle i itself is inspected
+			if (i == j)
+				continue;
+
 			// get the position of particle j
 			xj = position[2*j];
 			yj = position[2*j+1];
@@ -674,9 +707,13 @@ void update_verlet (void) {
 			dx = xi - xj;
 			dy = yi - yj;
 
-			// find images through altering dx and dy
-			dx -= dround(dx*Li) * L;
-			dy -= dround(dy*Li) * L;
+			// alter dx, this accounts for Lees-Edwards conditions
+			sig_y 	= dround(dy*Li);
+			dx 		+= sig_y * box_A;
+
+ 			// find images through altering dx and dy
+			dx -= dround(dx*Li)*L;
+			dy -= sig_y * L;
 
 			// find out squared distance and check against the verlet cutoff
 			r_squared = dx*dx + dy*dy;
@@ -696,8 +733,12 @@ void update_verlet (void) {
 			}
 		}
 
-		// ignore entry i=j
-		for (int j=(i+1); j<N; j++) {
+		for (int j=1; j<N; j+=2) {
+
+			// ignore entry where particle i itself is inspected
+			if (i == j)
+				continue;
+
 			// get the position of particle j
 			xj = position[2*j];
 			yj = position[2*j+1];
@@ -706,9 +747,13 @@ void update_verlet (void) {
 			dx = xi - xj;
 			dy = yi - yj;
 
-			// find images through altering dx and dy
-			dx -= dround(dx*Li) * L;
-			dy -= dround(dy*Li) * L;
+			// alter dx, this accounts for Lees-Edwards conditions
+			sig_y 	= dround(dy*Li);
+			dx 		+= sig_y * box_B;
+
+ 			// find images through altering dx and dy
+			dx -= dround(dx*Li)*L;
+			dy -= sig_y * L;
 
 			// find out squared distance and check against the verlet cutoff
 			r_squared = dx*dx + dy*dy;
