@@ -16,12 +16,16 @@
 #include <SDL/SDL.h>
 #include <hdf5.h>
 
+#include "assist_gui.h"
+
 
 #define PI 			3.14159265358979323846264338328
 
 static int 		N;
 static int 		steps;
 static double* 	positions;
+static double*	psi4;
+static double*	psi6;
 
 /*----------------------------------------------------------------------------------------------------------------------------*/
 int hdf5_read (char* file) {
@@ -97,7 +101,7 @@ int hdf5_read (char* file) {
 int graphicOutput () {
 
 	// create everything we need to show the simulation
-	SDL_Surface	*screen, *ball_even, *ball_uneven;
+	SDL_Surface	*screen, *ball_A, *ball_B, *psi_4_A, *psi_4_B, *psi_6_A, *psi_6_B;
 	SDL_Rect	dst_even, dst_uneven;
 	SDL_Event	event;
 
@@ -119,25 +123,49 @@ int graphicOutput () {
 	}
 
 	// get the picture of the black dot
-	ball_even = SDL_LoadBMP("Dots/Red_Dot_9x9px.bmp");
-	if (ball_even == NULL) {
+	ball_A = SDL_LoadBMP("Dots/Grey_Dot_9x9px.bmp");
+	if (ball_A == NULL) {
 		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
 		return EXIT_FAILURE;
 	}
 
 	// get the picture of the red dot
-	ball_uneven = SDL_LoadBMP("Dots/Green_Dot_5x5px.bmp");
-	if (ball_uneven == NULL) {
+	ball_B = SDL_LoadBMP("Dots/Grey_Dot_5x5px.bmp");
+	if (ball_B == NULL) {
+		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
+		return EXIT_FAILURE;
+	}
+
+	psi_4_A = SDL_LoadBMP("Dots/Red_Dot_9x9px.bmp");
+	if (psi_4_A == NULL) {
+		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
+		return EXIT_FAILURE;
+	}
+
+	psi_4_B = SDL_LoadBMP("Dots/Red_Dot_5x5px.bmp");
+	if (psi_4_B == NULL) {
+		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
+		return EXIT_FAILURE;
+	}
+
+	psi_6_A = SDL_LoadBMP("Dots/Blue_Dot_9x9px.bmp");
+	if (psi_6_A == NULL) {
+		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
+		return EXIT_FAILURE;
+	}
+
+	psi_6_B = SDL_LoadBMP("Dots/Blue_Dot_5x5px.bmp");
+	if (psi_6_B == NULL) {
 		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
 		return EXIT_FAILURE;
 	}
 
 	// get the height and width of our image, needed to blit it to screen
-	dst_even.w = ball_even->w;
-	dst_even.h = ball_even->h;
+	dst_even.w = ball_A->w;
+	dst_even.h = ball_A->h;
 
-	dst_uneven.w = ball_uneven->w;
-	dst_uneven.h = ball_uneven->h;
+	dst_uneven.w = ball_B->w;
+	dst_uneven.h = ball_B->h;
 
 	// variables for checking various states (terminating, what frame to show and whether a key was pressed)
 	int	done 		= 0;
@@ -236,18 +264,28 @@ int graphicOutput () {
 			// invert the y axis, otherwise (0,0) would be in the top left corner
 			posY = -positions[counter*2*N+2*i+1]+L;
 
+			// set the alpha values of all overlays
+			SDL_SetAlpha(psi_4_A, SDL_SRCALPHA, (int)(255*psi4[counter*N+i]));
+			SDL_SetAlpha(psi_4_B, SDL_SRCALPHA, (int)(255*psi4[counter*N+i]));
+			SDL_SetAlpha(psi_6_A, SDL_SRCALPHA, (int)(255*psi6[counter*N+i]));
+			SDL_SetAlpha(psi_6_B, SDL_SRCALPHA, (int)(255*psi6[counter*N+i]));
+
 			// copy image to screen according to whether we need a red or black dot
 			if (i%2 == 0) {
 				// compute x and y position of each dot
-				dst_even.x = round((positions[counter*2*N+2*i]/L) *scrWidth - ball_even->w/2.);
-				dst_even.y = round((posY/L)*scrHeight - ball_even->h/2.);
-				SDL_BlitSurface(ball_even, NULL, screen, &dst_even);
+				dst_even.x = round((positions[counter*2*N+2*i]/L) *scrWidth - ball_A->w/2.);
+				dst_even.y = round((posY/L)*scrHeight - ball_A->h/2.);
+				SDL_BlitSurface(ball_A, NULL, screen, &dst_even);
+				SDL_BlitSurface(psi_4_A, NULL, screen, &dst_even);
+				SDL_BlitSurface(psi_6_A, NULL, screen, &dst_even);
 			}
 			else {
 				// compute x and y position of each dot
-				dst_uneven.x = round((positions[counter*2*N+2*i]/L) *scrWidth - ball_uneven->w/2.);
-				dst_uneven.y = round((posY/L)*scrHeight - ball_uneven->h/2.);
-				SDL_BlitSurface(ball_uneven, NULL, screen, &dst_uneven);
+				dst_uneven.x = round((positions[counter*2*N+2*i]/L) *scrWidth - ball_B->w/2.);
+				dst_uneven.y = round((posY/L)*scrHeight - ball_B->h/2.);
+				SDL_BlitSurface(ball_B, NULL, screen, &dst_uneven);
+				SDL_BlitSurface(psi_4_B, NULL, screen, &dst_uneven);
+				SDL_BlitSurface(psi_6_B, NULL, screen, &dst_uneven);
 			}
 		}
 
@@ -259,12 +297,38 @@ int graphicOutput () {
 	}
 
 	// clear memory of everything cluttering it
-	SDL_FreeSurface(ball_even);
-	SDL_FreeSurface(ball_uneven);
+	SDL_FreeSurface(ball_A);
+	SDL_FreeSurface(ball_B);
 
 	// return to caller
 	return EXIT_SUCCESS;
 }
+
+/*----------------------------------------------------------------------------------------------------------------------------*/
+int computePsi() {
+
+	// allocate memory for psi values, check whether successfull
+	psi4 = malloc((steps+1)*N*sizeof(double));
+	psi6 = malloc((steps+1)*N*sizeof(double));
+
+	if (psi4 == NULL || psi6 == NULL) {
+		fprintf(stderr, "Memory for psi values could not be allocated, process will terminate. \n");
+		return EXIT_FAILURE;
+	}
+
+	// initiate psi calculation
+	init_psi(N, positions, psi4, psi6);
+
+	// iterate over all steps
+	for(int i=0; i<=steps; i++) {
+		compute_psi4(i);
+		compute_psi6(i);
+	}
+
+	return EXIT_SUCCESS;
+}
+
+
 
 /*----------------------------------------------------------------------------------------------------------------------------*/
 // TODO: write function description
@@ -285,6 +349,11 @@ int main (int argcount, char** argvektor) {
 	if (check != EXIT_SUCCESS) {
 		return EXIT_FAILURE;
 	}
+
+	// compute psi values
+	check = computePsi();
+	if (check != EXIT_SUCCESS)
+		return EXIT_FAILURE;
 
 	// compute graphic output
 	check = graphicOutput();

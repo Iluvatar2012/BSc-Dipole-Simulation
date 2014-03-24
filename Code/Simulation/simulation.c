@@ -2,7 +2,7 @@
 
 // define constants of the simulation
 #define 	N 					1000
-#define		thread_number		8
+#define		thread_number		4
 
 #define 	kT					1.0
 #define		tau_B				1.0
@@ -253,8 +253,8 @@ static void *iteration (int *no) {
 	double shear_one;
 	double shear_two;
 
-	double box_one;
-	double box_two;
+	double* box_one;
+	double* box_two;
 
 	double m_j;
 
@@ -271,8 +271,8 @@ static void *iteration (int *no) {
 		D_kT_two = D_Brown_B/kT;
 
 		// assign the right box displacement parameter
-		*box_one = *box_A;
-		*box_two = *box_B;
+		box_one = &box_A;
+		box_two = &box_B;
 	}
 	else {
 		// get the relation of all even values, this is basically the interaction relation this particle will have with other particles
@@ -287,8 +287,8 @@ static void *iteration (int *no) {
 		D_kT_two = D_Brown_A/kT;
 
 		// assign the right box displacement parameter
-		*box_one = *box_B;
-		*box_two = *box_A;
+		box_one = &box_B;
+		box_two = &box_A;
 	}
 
 	shear_one = v_s / (D_kT_one * L) * delta_t;
@@ -325,7 +325,7 @@ static void *iteration (int *no) {
 
 				// alter dx, this accounts for Lees-Edwards conditions
 				sig_y 	=  dround(dy*Li);
-				dx 		+= sig_y * (box_one);
+				dx 		+= sig_y * (*box_one);
 
  				// find images through altering dx and dy
 				dx -= dround(dx*Li)*L;
@@ -369,7 +369,7 @@ static void *iteration (int *no) {
 
 				// alter dx, this accounts for Lees-Edwards conditions
 				sig_y 	=  dround(dy*Li);
-				dx 		+= sig_y * (box_two);
+				dx 		+= sig_y * (*box_two);
 
  				// find images through altering dx and dy
 				dx -= dround(dx*Li)*L;
@@ -428,7 +428,7 @@ static void *iteration (int *no) {
 
 			// Calculate x positions with periodic boundary conditions, check whether the particle moved from one row to another
 			position[2*i] 	-= floor(position[2*i]*Li)*L;
-			position[2*i]	-= (floor((position[2*i+1]+L)*Li)-1)*(box_one);
+			position[2*i]	-= (floor((position[2*i+1]+L)*Li)-1)*(*box_one);
 
 			// Calculate y positions with periodic boundary conditions
 			position[2*i+1] -= floor(position[2*i+1]*Li)*L;
@@ -475,7 +475,7 @@ static void *iteration (int *no) {
 
 			// Calculate x positions with periodic boundary conditions, check whether the particle moved from one row to another
 			position[2*i] 	-= floor(position[2*i]*Li)*L;
-			position[2*i]	-= (floor((position[2*i+1]+L)*Li)-1)*(box_two);
+			position[2*i]	-= (floor((position[2*i+1]+L)*Li)-1)*(*box_two);
 
 			// Calculate y positions with periodic boundary conditions
 			position[2*i+1] -= floor(position[2*i+1]*Li)*L;

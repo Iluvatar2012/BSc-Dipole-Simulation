@@ -5,7 +5,7 @@
 
 
 /*----------------------------------------------------------------------------------------------------------------------------*/
-int graphicOutput (char* file, double* config, int* psi_4, int* psi_6, int N, int counter_4, int counter_6) {
+int graphicOutput (char* file, double* config, double* psi_4, double* psi_6, int N) {
 
 	// basic variables
 	double dx, dy;
@@ -13,8 +13,8 @@ int graphicOutput (char* file, double* config, int* psi_4, int* psi_6, int N, in
 
 
 	// create everything we need to show the simulation
-	SDL_Surface	*screen, *ball_even, *ball_uneven, *psi_4_ball, *psi_6_ball;
-	SDL_Rect	dst_even, dst_uneven, dst_psi_4, dst_psi_6;
+	SDL_Surface	*screen, *ball_A, *ball_B, *psi_4_A, *psi_4_B, *psi_6_A, *psi_6_B;
+	SDL_Rect	dst_A, dst_B;
 
 	// initiate the SDL video mode, terminate if there was an error
 	if ((SDL_Init(SDL_INIT_VIDEO)) == -1) {
@@ -26,53 +26,56 @@ int graphicOutput (char* file, double* config, int* psi_4, int* psi_6, int N, in
 	atexit(SDL_Quit);
 
 	// set up the screen, this will be our frame, terminate if there was an error
-	screen = SDL_SetVideoMode(600, 600, 16, SDL_HWSURFACE | SDL_DOUBLEBUF);
+	screen = SDL_SetVideoMode(600, 600, 32, SDL_HWSURFACE | SDL_DOUBLEBUF);
 	SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 255, 255, 255));
 	if (screen == NULL) {
 		fprintf(stderr, "Could not set video mode: %s\n", SDL_GetError());
 		return EXIT_FAILURE;
 	}
 
-	// get the picture of the red dot
-	ball_even = SDL_LoadBMP("Dots/Red_Dot_9x9px.bmp");
-	if (ball_even == NULL) {
+	// get the picture of all particles
+	ball_A = SDL_LoadBMP("Dots/Grey_Dot_9x9px.bmp");
+	if (ball_A == NULL) {
 		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
 		return EXIT_FAILURE;
 	}
 
-	// get the picture of the green dot
-	ball_uneven = SDL_LoadBMP("Dots/Green_Dot_5x5px.bmp");
-	if (ball_uneven == NULL) {
+	ball_B = SDL_LoadBMP("Dots/Grey_Dot_5x5px.bmp");
+	if (ball_B == NULL) {
 		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
 		return EXIT_FAILURE;
 	}
 
-	// get the picture of the green dot
-	psi_4_ball = SDL_LoadBMP("Dots/Orange_Dot_5x5px.bmp");
-	if (psi_4_ball == NULL) {
+	psi_4_A = SDL_LoadBMP("Dots/Red_Dot_9x9px.bmp");
+	if (psi_4_A == NULL) {
 		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
 		return EXIT_FAILURE;
 	}
 
-	// get the picture of the green dot
-	psi_6_ball = SDL_LoadBMP("Dots/Blue_Dot_9x9px.bmp");
-	if (psi_6_ball == NULL) {
+	psi_4_B = SDL_LoadBMP("Dots/Red_Dot_5x5px.bmp");
+	if (psi_4_B == NULL) {
+		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
+		return EXIT_FAILURE;
+	}
+
+	psi_6_A = SDL_LoadBMP("Dots/Blue_Dot_9x9px.bmp");
+	if (psi_6_A == NULL) {
+		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
+		return EXIT_FAILURE;
+	}
+
+	psi_6_B = SDL_LoadBMP("Dots/Blue_Dot_5x5px.bmp");
+	if (psi_6_B == NULL) {
 		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
 		return EXIT_FAILURE;
 	}
 
 	// get the height and width of our image, needed to blit it to screen
-	dst_even.w = ball_even->w;
-	dst_even.h = ball_even->h;
+	dst_A.w = ball_A->w;
+	dst_A.h = ball_A->h;
 
-	dst_uneven.w = ball_uneven->w;
-	dst_uneven.h = ball_uneven->h;
-
-	dst_psi_4.w = psi_4_ball->w;
-	dst_psi_4.h = psi_4_ball->h;
-
-	dst_psi_6.w = psi_6_ball->w;
-	dst_psi_6.h = psi_6_ball->h;
+	dst_B.w = ball_B->w;
+	dst_B.h = ball_B->h;
 
 	// the box's length
 	double L 		= sqrt(N/2.);
@@ -90,76 +93,48 @@ int graphicOutput (char* file, double* config, int* psi_4, int* psi_6, int N, in
 		posY = -config[2*i+1]+L;
 
 		// compute x and y position of each dot
-		dst_even.x 	 = round((config[2*i]/L)  *scrWidth -ball_even->w/2.);
-		dst_uneven.x = round((config[2*i]/L)  *scrWidth -ball_uneven->w/2.);
+		dst_A.x = round((config[2*i]/L)  *scrWidth -ball_A->w/2.);
+		dst_B.x = round((config[2*i]/L)  *scrWidth -ball_B->w/2.);
 
-		dst_even.y   = round((posY/L)*scrHeight-ball_even->h/2.);
-		dst_uneven.y = round((posY/L)*scrHeight-ball_uneven->h/2.);
+		dst_A.y = round((posY/L)*scrHeight-ball_A->h/2.);
+		dst_B.y = round((posY/L)*scrHeight-ball_B->h/2.);
 
 		// copy image to screen according to whether we need a red or green dot
 		if (i%2 == 0)
-			SDL_BlitSurface(ball_even, NULL, screen, &dst_even);
+			SDL_BlitSurface(ball_A, NULL, screen, &dst_A);
 		else
-			SDL_BlitSurface(ball_uneven, NULL, screen, &dst_uneven);
-	}
+			SDL_BlitSurface(ball_B, NULL, screen, &dst_B);
 
-	// basic variables
-	int k;
+		// set the alpha values of all overlays
+		SDL_SetAlpha(psi_4_A, SDL_SRCALPHA, (int)(255*psi_4[i]));
+		SDL_SetAlpha(psi_4_B, SDL_SRCALPHA, (int)(255*psi_4[i]));
+		SDL_SetAlpha(psi_6_A, SDL_SRCALPHA, (int)(255*psi_6[i]));
+		SDL_SetAlpha(psi_6_B, SDL_SRCALPHA, (int)(255*psi_6[i]));
 
-	// draw the objects determined by the Psi 4 algorithm
-	for (int i=0; i<counter_4; i++) {
+		// draw the psi_4 value for the current dot
+		if (i%2 == 0)
+			SDL_BlitSurface(psi_4_A, NULL, screen, &dst_A);
+		else
+			SDL_BlitSurface(psi_4_B, NULL, screen, &dst_B);		
 
-		// iterate over all 5 relevant particles
-		for (int j=0; j<5; j++) {
-			k = psi_4[5*i + j];
-
-			// invert the y axis, otherwise (0,0) would be in the top left corner
-			posY = -config[2*k+1]+L;
-
-			// compute x and y position of each dot
-			dst_psi_4.x = round((config[2*k]/L)  *scrWidth -psi_4_ball->w/2.);
-			dst_psi_6.x = round((config[2*k]/L)  *scrWidth -psi_6_ball->w/2.);
-
-			dst_psi_4.y = round((posY/L)*scrHeight-psi_4_ball->h/2.);
-			dst_psi_6.y = round((posY/L)*scrHeight-psi_6_ball->h/2.);
-
-			if (k%2 == 0)
-				SDL_BlitSurface(psi_6_ball, NULL, screen, &dst_psi_6);
-			else
-				SDL_BlitSurface(psi_4_ball, NULL, screen, &dst_psi_4);
-		}
-	}
-
-	// draw the objects determined by the Psi 6 algorithm
-	for (int i=0; i<counter_6; i++) {
-
-		// iterate over all 5 relevant particles
-		for (int j=0; j<7; j++) {
-			k = psi_6[7*i + j];
-
-			// invert the y axis, otherwise (0,0) would be in the top left corner
-			posY = -config[2*k+1]+L;
-
-			// compute x and y position of each dot
-			dst_psi_4.x = round((config[2*k]/L)  *scrWidth -psi_4_ball->w/2.);
-			dst_psi_6.x = round((config[2*k]/L)  *scrWidth -psi_6_ball->w/2.);
-
-			dst_psi_4.y = round((posY/L)*scrHeight-psi_4_ball->h/2.);
-			dst_psi_6.y = round((posY/L)*scrHeight-psi_6_ball->h/2.);
-
-			if (k%2 == 0)
-				SDL_BlitSurface(psi_6_ball, NULL, screen, &dst_psi_6);
-			else
-				SDL_BlitSurface(psi_4_ball, NULL, screen, &dst_psi_4);
-		}
+		// draw the psi_6 value for the current dot
+		if (i%2 == 0)
+			SDL_BlitSurface(psi_6_A, NULL, screen, &dst_A);
+		else
+			SDL_BlitSurface(psi_6_B, NULL, screen, &dst_B);
 	}
 
 	// save the screen to file
 	SDL_SaveBMP(screen, file);
 
 	// clear memory of everything cluttering it
-	SDL_FreeSurface(ball_even);
-	SDL_FreeSurface(ball_uneven);
+	SDL_FreeSurface(ball_A);
+	SDL_FreeSurface(ball_B);
+	SDL_FreeSurface(psi_4_A);
+	SDL_FreeSurface(psi_4_B);
+	SDL_FreeSurface(psi_6_A);
+	SDL_FreeSurface(psi_6_B);
+	SDL_FreeSurface(screen);
 
 	// return to caller
 	return EXIT_SUCCESS;

@@ -4,7 +4,7 @@
 *picture
 *.hdf5
 *Results/
-*Config_Files/*
+*Config_Files/1
 !*Config_Files/default
 *Test/
 *Jobs/

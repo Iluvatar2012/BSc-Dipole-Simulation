@@ -4,10 +4,11 @@ NAME 	:= ../../Work/graphic
 # define necessary libraries
 LIBS 	:= -lm -lhdf5 -lSDL
 
-all: simulation.o
+all: simulation.o assist_gui.o
+	@echo ' '
 	@echo '--------------------------------------------------------------------------------------------------------------------------------------'
 	@echo 'Invoking: GCC C Linker'
-	$(CC) simulation.o -o $(NAME) $(LIBS)
+	$(CC) simulation.o assist_gui.o -o $(NAME) $(LIBS)
 	@echo 'Finished building: '$(NAME)
 	@echo ' '
 
@@ -20,4 +21,6 @@ simulation.o: simulation_gui.c
 	@echo '--------------------------------------------------------------------------------------------------------------------------------------'
 	@echo 'Invoking: GCC C Compiler'
 	$(CC) $(CFLAGS) -o simulation.o simulation_gui.c
-	@echo ' '
+
+assist_gui.o: assist_gui.c
+	$(CC) $(CFLAGS) -o assist_gui.o assist_gui.c
