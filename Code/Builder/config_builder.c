@@ -3,7 +3,7 @@
 #include <string.h>
 
 // define variables which will probably not be altered, except for hardcode
-#define 	m			0.1
+#define 	m			1.0
 #define 	dt 			1e-6
 #define 	writestep	1000
 

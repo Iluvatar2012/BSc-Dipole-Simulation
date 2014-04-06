@@ -145,7 +145,7 @@ int init(struct sim_struct *param, double* init_positions) {
 
 	// compute the size of the Verlet list, add 15% as safety margin
 	N_Verlet = N*PI*cutoff_squared/(L*L);
-	N_Verlet *= 1.15;
+	N_Verlet *= 1.1;
 
 	// check whether an old configuration of data can be used or whether new memory has to be allocated
 	if (init_positions != NULL) {
@@ -328,8 +328,8 @@ static void *iteration (int *no) {
 				dx 		+= sig_y * (*box_one);
 
  				// find images through altering dx and dy
-				dx -= dround(dx*Li)*L;
-				dy -= sig_y * L;
+				dx 		-= dround(dx*Li)*L;
+				dy		-= sig_y * L;
 
 				// get square of distance and compute force in x and y direction
 				r_squared = dx*dx + dy*dy;
@@ -372,8 +372,8 @@ static void *iteration (int *no) {
 				dx 		+= sig_y * (*box_two);
 
  				// find images through altering dx and dy
-				dx -= dround(dx*Li)*L;
-				dy -= sig_y * L;
+				dx		-= dround(dx*Li)*L;
+				dy		-= sig_y * L;
 
 				// get square of distance and compute force in x and y direction
 				r_squared = dx*dx + dy*dy;
@@ -428,7 +428,7 @@ static void *iteration (int *no) {
 
 			// Calculate x positions with periodic boundary conditions, check whether the particle moved from one row to another
 			position[2*i] 	-= floor(position[2*i]*Li)*L;
-			position[2*i]	-= (floor((position[2*i+1]+L)*Li)-1)*(*box_one);
+			position[2*i]	-= (floor((position[2*i+1]+L)*Li)-1)*(*box_one); // WTF?!?
 
 			// Calculate y positions with periodic boundary conditions
 			position[2*i+1] -= floor(position[2*i+1]*Li)*L;
