@@ -2,6 +2,7 @@
 *graphic
 *builder
 *picture
+*equaliser
 *.hdf5
 *Results/
 */Config_Files/*
@@ -11,4 +12,3 @@
 *Start/*
 *analysis
 *analyze.sh
-*Equalised/

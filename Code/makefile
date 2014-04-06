@@ -35,3 +35,10 @@ all:
 	@echo ' '
 	@echo ' '
 	$(MAKE) -C Analysis/ all
+
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	$(MAKE) -C Equaliser/ all
