@@ -2,7 +2,7 @@
 
 // define constants of the simulation
 #define 	N 					1000
-#define		thread_number		4
+#define		thread_number		8
 
 #define 	kT					1.0
 #define		tau_B				1.0
