@@ -4,6 +4,7 @@
 *picture
 *equaliser
 *.hdf5
+*.bmp
 *Results/
 */Config_Files/*
 !*/Config_Files/default
