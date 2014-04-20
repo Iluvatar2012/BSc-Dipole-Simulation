@@ -19,7 +19,7 @@
 #include "assist_gui.h"
 
 
-#define PI 			3.14159265358979323846264338328
+// #define PI 			3.14159265358979323846264338328
 
 static int 		N;
 static int 		steps;

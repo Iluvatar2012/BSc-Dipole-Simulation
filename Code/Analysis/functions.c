@@ -3,27 +3,27 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "assist_gui.h"
-
+#include "structs.h"
+#include "functions.h"
 
 // basic variables
+static int		N;
+
 static double* 	config;
 static double* 	psi4;
 static double* 	psi6;
-
-static int		N;
-
-
+static double* 	laning;
 
 /*----------------------------------------------------------------------------------------------------------------------------*/
-void init_psi (int initN, double* positions, double* initPsi4, double* initPsi6) {
-	config 	= positions;
-	N 		= initN;
-	psi4 	= initPsi4;
-	psi6 	= initPsi6;
+void init (struct variables* var) {
+	config 	= var->positions;
+	N 		= var->N;
+	psi4 	= var->psi4;
+	psi6 	= var->psi6;
+	laning 	= var->laning;
+
+	free(var);
 }
-
-
 
 /*----------------------------------------------------------------------------------------------------------------------------*/
 void compute_psi4 (int l) {
@@ -56,8 +56,8 @@ void compute_psi4 (int l) {
 				continue;
 
 			// compute squared distance between particles i and j
-			dx   = config[2*N*j+2*i]   - config[2*N*j+2*j];
-			dy   = config[2*N*j+2*i+1] - config[2*N*j+2*j+1];
+			dx   = config[2*N*l+2*i]   - config[2*N*l+2*j];
+			dy   = config[2*N*l+2*i+1] - config[2*N*l+2*j+1];
 
 			r_sq = dx*dx + dy*dy;
 
@@ -111,8 +111,8 @@ void compute_psi6(int l) {
 				continue;
 
 			// compute squared distance between particles i and j
-			dx   = config[2*N*j+2*i]   - config[2*N*j+2*j];
-			dy   = config[2*N*j+2*i+1] - config[2*N*j+2*j+1];
+			dx   = config[2*N*l+2*i]   - config[2*N*l+2*j];
+			dy   = config[2*N*l+2*i+1] - config[2*N*l+2*j+1];
 
 			r_sq = dx*dx + dy*dy;
 
@@ -174,6 +174,48 @@ void bubble_sort (double* dist, int* next, int n) {
 
 }
 
+
+/*----------------------------------------------------------------------------------------------------------------------------*/
+void laning(int step) {
+
+	// iterate over all particles 
+	for (int i=0; i<N; i++) {
+
+		double l1, l2, l3;
+
+		// set the default length to one box length
+		double L = sqrt(N/2.);
+		double l = L;
+
+		for (int j=0; j<N; j++) {
+			// skip the particle itself
+			if (i==j || i%2 == j%2)
+				continue;
+
+			// check whether the particles are within one lane, this is a lane of 0.25 around the particle
+			if (abs(positions[2*N*step+2*i+1]-positions[2*N*step+2*j+1]) < 1/8.) {
+
+				// store the x-distance between the two particles and the periodic pictures
+				l1 = abs(positions[2*N*step+2*i]-positions[2*N*step+2*j]);
+				l2 = abs(positions[2*N*step+2*i]-positions[2*N*step+2*j]+L);
+				l3 = abs(positions[2*N*step+2*i]-positions[2*N*step+2*j]-L);
+
+				// check if a shorter lane has been found
+				if (l1 < l)
+					l = l1;
+
+				if (l2 < l)
+					l = l2;
+
+				if (l3 < l)
+					l = l3;
+			}
+		}
+
+		// store the value in the laning array
+		laning[N*step+i] = l;
+	}
+}
 
 
 /*----------------------------------------------------------------------------------------------------------------------------*/

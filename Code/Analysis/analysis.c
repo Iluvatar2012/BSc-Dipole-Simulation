@@ -1,199 +1,104 @@
-#include <math.h>
-#include <stdio.h>
+#define _GNU_SOURCE
+
 #include <stdlib.h>
+#include <stdio.h>
+
 #include <string.h>
+#include <pthread.h>
 
-#include "hdf5_read.h"
-#include "picture.h"
-#include "assist.h"
-
-// basic variables
-static double* 	config;
-static double* 	psi4;
-static double* 	psi6;
-
-static int		N;
+#include "functions.h"
+#include "hdf5.h"
 
 
+static int 			steps;
+static int 			N;
+static double* 		positions;
 
-/*----------------------------------------------------------------------------------------------------------------------------*/
-int compute_psi4 () {
+static double*		psi4;
+static double*		psi6;
+static double* 		laning;
 
-	// basic variables
-	double 	dx, dy;
-	double 	r_sq;
-	double 	theta;
-	double	real, img, abs;
+static pthread_t*	threads;
 
-	double 	dist[4] = {1E6, 1E6, 1E6, 1E6};
-	int		next[4];
-
-	int		length  = 1;
-
-	// allocate the necessary memory, check if successful
-	psi4 = malloc(N*sizeof(double));
-
-	if (psi4 == NULL) {
-		return EXIT_FAILURE;
+/*-------------------------------------------------------------------------------------------------------*/
+void thread_psi4 () {
+	for (int i=0; i<=(steps); i++) {
+		compute_psi4(i);
 	}
-
-	// iterate over all particles
-	for (int i=1; i<N; i++) {
-
-		// reinitiate both lists
-		for (int k=0; k<4; k++) {
-			dist[k] = 1E6;
-			next[k] = N;
-		}
-
-		// get the four shortest distances to particle i
-		for (int j=0; j<N; j++) {
-
-			// ignore i=j
-			if (i == j) 
-				continue;
-
-			// compute squared distance between particles i and j
-			dx   = config[2*i]   - config[2*j];
-			dy   = config[2*i+1] - config[2*j+1];
-
-			r_sq = dx*dx + dy*dy;
-
-			// continue if distance is too great
-			if (r_sq > 5)
-				continue;
-
-			// order the distance and particle index within their respective lists
-			if (r_sq < dist[3]) {
-				dist[3] = r_sq;
-				next[3] = j;
-
-				bubble_sort(dist, next, 4);
-			}
-		}
-
-		// calculate psi 4 value
-		psi4[i] = psi_n(4, i, config, next);
-	}
-
-	// return to caller
-	return EXIT_SUCCESS;
 }
 
-
-
-/*----------------------------------------------------------------------------------------------------------------------------*/
-int compute_psi6() {
-		// basic variables
-	double 	dx, dy;
-	double 	r_sq;
-	double 	theta;
-	double	real, img, abs;
-
-	double 	dist[6] = {1E6, 1E6, 1E6, 1E6, 1E6, 1E6};
-	int		next[6];
-
-	int		length  = 1;
-
-	// allocate the necessary memory, check if successful
-	psi6 = malloc(N*sizeof(double));
-
-	if (psi6 == NULL) {
-		return EXIT_FAILURE;
+/*-------------------------------------------------------------------------------------------------------*/
+void thread_psi6() {
+	for (int i=0; i<=(steps); i++) {
+		compute_psi6(i);
 	}
-
-	// iterate over all particles
-	for (int i=0; i<N; i++) {
-
-		// reinitiate both lists
-		for (int k=0; k<6; k++) {
-			dist[k] = 1E6;
-			next[k] = N;
-		}
-
-		// get the four shortest distances to particle i
-		for (int j=0; j<N; j++) {
-
-			// ignore i=j
-			if (i == j) 
-				continue;
-
-			// compute squared distance between particles i and j
-			dx   = config[2*i]   - config[2*j];
-			dy   = config[2*i+1] - config[2*j+1];
-
-			r_sq = dx*dx + dy*dy;
-
-			// continue if distance is too great
-			if (r_sq > 5)
-				continue;
-
-			// order the distance and particle index within their respective lists
-			if (r_sq < dist[5]) {
-				dist[5] = r_sq;
-				next[5] = j;
-
-				bubble_sort(dist, next, 6);
-			}
-		}
-
-		// calculate psi 6 value
-		psi6[i] = psi_n (6, i, config, next);
-	}
-
-	// return to caller
-	return EXIT_SUCCESS;
 }
 
+/*-------------------------------------------------------------------------------------------------------*/
+void thread_laning() {
 
+}
 
-/*----------------------------------------------------------------------------------------------------------------------------*/
-int main (int argcount, char** argvektor) {
+/*-------------------------------------------------------------------------------------------------------*/
+int main (int argcount, char** argvector) {
 
-	// basic variables
-	int 	check;
-	char* 	dot;
-	size_t 	length;
+	int ret_thread;
 
-	char	file[1024];
-
-	// check whether user provided a filename and timestep to compute
-	if (argcount != 3) {
-		fprintf(stderr, "Please provide a filename (1) and timestep (2) (number, \"first\" or \"last\") to read.\n"
-						"Program will now terminate. \n");
-		return EXIT_SUCCESS;
-	}
-
-	// read the expected configuration from file, check whether successful
-	config = read_config(argvektor[1], argvektor[2], &N);
-
-	if (config == NULL)
-		return EXIT_FAILURE;
-
-	// compute psi-4 and psi-6 and check if successful
-	if ((check = compute_psi4()) != EXIT_SUCCESS) {
-		fprintf(stderr, "Computing Psi 4 failed, process will terminate. \n");
+	// check whether the right amount of arguments is given
+	if (argcount != 2) {
+		fprintf(stderr, "Please provide only a filename to read from, process will terminate.\n");
 		return EXIT_FAILURE;
 	}
 
-	if ((check = compute_psi6()) != EXIT_SUCCESS) {
-		fprintf(stderr, "Computing Psi 6 failed, process will terminate. \n");
+	// read from the given file, check whether successful
+	struct parameters *param = hdf5_read(argvector[1]);
+
+	if (param == NULL) {
 		return EXIT_FAILURE;
 	}
 
-	// compute the filename and produce a picture, check whether successful
-	strncpy(file, argvektor[1], 1024);
+	// copy data from struct
+	N 			= param->N;
+	steps		= param->steps;
+	positions 	= param->positions;
 
-	dot		= strrchr(file, '.');
-	*dot	= '\0';
+	// allocate memory, check whether successful
+	psi4 	= malloc((steps+1)*N*sizeof(double));
+	psi6 	= malloc((steps+1)*N*sizeof(double));
+	laning 	= malloc((steps+1)*N*sizeof(double));
 
-	length 	= strlen(argvektor[1]);
-	strncat(file, "__analysis.bmp", 1024-length);
-
-	if ((check = graphicOutput (file, config, psi4, psi6, N)) != EXIT_SUCCESS) {
+	if (psi4 == NULL || psi6 == NULL || laning == NULL) {
+		fprintf(stderr, "Memory for psi and laning values could not be allocated, process will terminate. \n");
 		return EXIT_FAILURE;
 	}
 
-	// return to caller
-	return EXIT_SUCCESS;
+	// construct a new struct, initiate the helper file
+	struct variables var = {.N = N, .positions = positions, .psi4 = .psi4, .psi6 = psi6, .laning = laning};
+	init(&var);
+
+	fprintf(stderr, "Starting computation. \n");
+
+	// initiate threads, check if successful
+	threads = malloc(3*sizeof(pthread_t));
+
+	ret_thread 	= pthread_create(&(threads[0]), NULL, (void*)&thread_psi4, NULL);
+
+	if (ret_thread != 0) {
+		fprintf(stderr, "Thread %d could not be created. \n", 0);
+		exit(EXIT_FAILURE);
+	}
+	
+	ret_thread 	= pthread_create(&(threads[1]), NULL, (void*)&thread_psi6, NULL);
+
+	if (ret_thread != 0) {
+		fprintf(stderr, "Thread %d could not be created. \n", 1);
+		exit(EXIT_FAILURE);
+	}
+	
+	ret_thread 	= pthread_create(&(threads[2]), NULL, (void*)&thread_laning, NULL);
+
+	if (ret_thread != 0) {
+		fprintf(stderr, "Thread %d could not be created. \n", 2);
+		exit(EXIT_FAILURE);
+	}
 }
