@@ -6,6 +6,7 @@
 extern void 	init (struct variables*);
 extern void		compute_psi4 (int);
 extern void		compute_psi6 (int);
+extern void 	laning(int);
 extern void 	bubble_sort (double*, int*, int);
 extern double 	psi_n (int, int, int, int*);
 

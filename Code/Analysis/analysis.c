@@ -6,17 +6,19 @@
 #include <string.h>
 #include <pthread.h>
 
+#include <unistd.h>
+
 #include "functions.h"
 #include "hdf5.h"
+#include "structs.h"
 
 
-static int 			steps;
-static int 			N;
+static int 			steps, N;
 static double* 		positions;
 
-static double*		psi4;
-static double*		psi6;
-static double* 		laning;
+static double*		psi4, psi6, laning;
+
+static int 			psi4_done, psi6_done, laning_done;
 
 static pthread_t*	threads;
 
@@ -25,6 +27,8 @@ void thread_psi4 () {
 	for (int i=0; i<=(steps); i++) {
 		compute_psi4(i);
 	}
+
+	psi4_done = 1;
 }
 
 /*-------------------------------------------------------------------------------------------------------*/
@@ -32,11 +36,17 @@ void thread_psi6() {
 	for (int i=0; i<=(steps); i++) {
 		compute_psi6(i);
 	}
+
+	psi6_done = 1;
 }
 
 /*-------------------------------------------------------------------------------------------------------*/
 void thread_laning() {
+	for (int i=0; i<=(steps); i++) {
+		laning(i);
+	}
 
+	laning_done = 1;
 }
 
 /*-------------------------------------------------------------------------------------------------------*/
@@ -78,6 +88,11 @@ int main (int argcount, char** argvector) {
 
 	fprintf(stderr, "Starting computation. \n");
 
+	// set waiting values
+	psi4_done 	= 0;
+	psi6_done 	= 0;
+	laning_done = 0;
+
 	// initiate threads, check if successful
 	threads = malloc(3*sizeof(pthread_t));
 
@@ -101,4 +116,11 @@ int main (int argcount, char** argvector) {
 		fprintf(stderr, "Thread %d could not be created. \n", 2);
 		exit(EXIT_FAILURE);
 	}
+
+	// wait until all threads have finished iterating
+	while(psi4_done != 1 || psi6_done != 1 || laning_done != 1) {
+		usleep(500*1000);
+	}
+
+	// TODO: save all data to file
 }
