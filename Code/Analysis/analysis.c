@@ -8,17 +8,21 @@
 
 #include <unistd.h>
 
+#include "structs.h"
 #include "functions.h"
 #include "hdf5.h"
-#include "structs.h"
 
 
 static int 			steps, N;
 static double* 		positions;
 
-static double*		psi4, psi6, laning;
+static double*		psi4;
+static double* 		psi6;
+static double* 		laning;
 
-static int 			psi4_done, psi6_done, laning_done;
+static int 			psi4_done;
+static int 			psi6_done;
+static int 			laning_done;
 
 static pthread_t*	threads;
 
@@ -43,7 +47,7 @@ void thread_psi6() {
 /*-------------------------------------------------------------------------------------------------------*/
 void thread_laning() {
 	for (int i=0; i<=(steps); i++) {
-		laning(i);
+		compute_laning(i);
 	}
 
 	laning_done = 1;
@@ -52,13 +56,19 @@ void thread_laning() {
 /*-------------------------------------------------------------------------------------------------------*/
 int main (int argcount, char** argvector) {
 
-	int ret_thread;
+	int 	ret_thread;
+
+	time_t 	inittime, currenttime, runtime;
+	char*	timestring;
 
 	// check whether the right amount of arguments is given
 	if (argcount != 2) {
 		fprintf(stderr, "Please provide only a filename to read from, process will terminate.\n");
 		return EXIT_FAILURE;
 	}
+
+	// user output
+	fprintf(stderr, "Reading file...\n");
 
 	// read from the given file, check whether successful
 	struct parameters *param = hdf5_read(argvector[1]);
@@ -72,6 +82,9 @@ int main (int argcount, char** argvector) {
 	steps		= param->steps;
 	positions 	= param->positions;
 
+	// user output
+	fprintf(stderr, "Allocating memory...\n");
+
 	// allocate memory, check whether successful
 	psi4 	= malloc((steps+1)*N*sizeof(double));
 	psi6 	= malloc((steps+1)*N*sizeof(double));
@@ -83,10 +96,14 @@ int main (int argcount, char** argvector) {
 	}
 
 	// construct a new struct, initiate the helper file
-	struct variables var = {.N = N, .positions = positions, .psi4 = .psi4, .psi6 = psi6, .laning = laning};
+	struct variables var = {.N = N, .positions = positions, .psi4 = psi4, .psi6 = psi6, .laning = laning};
 	init(&var);
 
-	fprintf(stderr, "Starting computation. \n");
+	// user output
+	fprintf(stderr, "Starting computation...\n");
+
+	// get current time, needed for runtime
+	time(&inittime);
 
 	// set waiting values
 	psi4_done 	= 0;
@@ -119,8 +136,26 @@ int main (int argcount, char** argvector) {
 
 	// wait until all threads have finished iterating
 	while(psi4_done != 1 || psi6_done != 1 || laning_done != 1) {
+		// compute and print runtime to user, wait for half a second
+		time(&currenttime);
+		runtime = currenttime - inittime;
+
+		fprintf(stderr, "Computing time: \t\t\t%d s\r", (int)(runtime));
+
 		usleep(500*1000);
 	}
 
-	// TODO: save all data to file
+	fprintf(stderr, "\nDone, writing to file...\n");
+	// create a new struct for storing data to file
+	struct analysis data = {.N = N, .steps = steps, .file = argvector[1], .psi4 = psi4, .psi6 = psi6, .laning = laning};
+
+	// store data to file
+	if (add_analysis(&data) != EXIT_SUCCESS) 
+		return EXIT_FAILURE;
+
+	// user output
+	fprintf(stderr, "Finished successfully!\n");
+
+	// return to caller
+	return EXIT_SUCCESS;
 }

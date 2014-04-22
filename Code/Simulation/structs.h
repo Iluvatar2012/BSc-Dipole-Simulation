@@ -1,10 +1,3 @@
-/*
- * structs.h
- *
- *  Created on: Aug 21, 2013
- *      Author: Aiko Bernehed
- */
-
 #ifndef STRUCTS_H_
 #define STRUCTS_H_
 

@@ -21,8 +21,17 @@ void init (struct variables* var) {
 	psi4 	= var->psi4;
 	psi6 	= var->psi6;
 	laning 	= var->laning;
+}
 
-	free(var);
+
+/*----------------------------------------------------------------------------------------------------------------------------*/
+double dabs(double in) {
+
+	// function for determining double precision absolute values
+	if (in < 0)
+		return -in;
+	else
+		return in;
 }
 
 /*----------------------------------------------------------------------------------------------------------------------------*/
@@ -176,7 +185,7 @@ void bubble_sort (double* dist, int* next, int n) {
 
 
 /*----------------------------------------------------------------------------------------------------------------------------*/
-void laning(int step) {
+void compute_laning(int step) {
 
 	// iterate over all particles 
 	for (int i=0; i<N; i++) {
@@ -193,12 +202,12 @@ void laning(int step) {
 				continue;
 
 			// check whether the particles are within one lane, this is a lane of 0.25 around the particle
-			if (abs(positions[2*N*step+2*i+1]-positions[2*N*step+2*j+1]) < 1/8.) {
+			if (dabs(config[2*N*step+2*i+1]-config[2*N*step+2*j+1]) < 1/8.) {
 
 				// store the x-distance between the two particles and the periodic pictures
-				l1 = abs(positions[2*N*step+2*i]-positions[2*N*step+2*j]);
-				l2 = abs(positions[2*N*step+2*i]-positions[2*N*step+2*j]+L);
-				l3 = abs(positions[2*N*step+2*i]-positions[2*N*step+2*j]-L);
+				l1 = dabs(config[2*N*step+2*i]-config[2*N*step+2*j]);
+				l2 = dabs(config[2*N*step+2*i]-config[2*N*step+2*j]+L);
+				l3 = dabs(config[2*N*step+2*i]-config[2*N*step+2*j]-L);
 
 				// check if a shorter lane has been found
 				if (l1 < l)

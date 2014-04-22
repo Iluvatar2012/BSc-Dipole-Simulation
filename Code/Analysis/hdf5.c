@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#include <hdf5>
+#include <hdf5.h>
 
 #include "structs.h"
 
@@ -86,4 +86,62 @@ struct parameters *hdf5_read (char* file) {
 
 	// return to caller
 	return param;
+}
+
+
+/*----------------------------------------------------------------------------------------------------------------------------*/
+int add_analysis (struct analysis* data) {
+
+	// get all data from incoming struct
+	int N 			= data->N;
+	int steps 		= data->steps;
+
+	char* file 		= data->file;
+
+	double* psi4 	= data->psi4;
+	double* psi6 	= data->psi6;
+	double* laning 	= data->laning;	
+
+	// identfiers
+	hid_t	file_id, psi4_set, psi6_set, laning_set;
+	hid_t	psi4_space, psi6_space, laning_space;
+	herr_t	status;
+
+	// dimensions
+	hsize_t	dims		= (steps+1)*N;
+
+	// open the file, check whether operation was successful
+	file_id	= H5Fopen(file, H5F_ACC_RDWR, H5P_DEFAULT);
+
+	if (file_id < 0) {
+		fprintf(stderr, "File could not be opened, program will now terminate!\nPath: %s\n", file);
+		return EXIT_FAILURE;
+	}
+
+	// create new dataspaces for data analysis
+	psi4_space 		= H5Screate_simple(1, &dims, NULL);
+	psi6_space 		= H5Screate_simple(1, &dims, NULL);
+	laning_space 	= H5Screate_simple(1, &dims, NULL);
+
+	// create new datasets for all data
+	psi4_set	= H5Dcreate2(file_id, "/psi4", H5T_NATIVE_DOUBLE, psi4_space, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+	psi6_set	= H5Dcreate2(file_id, "/psi6", H5T_NATIVE_DOUBLE, psi6_space, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+	laning_set	= H5Dcreate2(file_id, "/laning", H5T_NATIVE_DOUBLE, laning_space, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+
+	// write all data
+	status = H5Dwrite(psi4_set, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, psi4);
+	status = H5Dwrite(psi6_set, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, psi6);
+	status = H5Dwrite(laning_set, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, laning);
+
+	// close everything, free struct
+	H5Dclose(psi4_set);
+	H5Dclose(psi6_set);
+	H5Dclose(laning_set);
+	H5Sclose(psi4_space);
+	H5Sclose(psi6_space);
+	H5Sclose(laning_space);
+	H5Fclose(file_id);
+
+	// return to caller
+	return EXIT_SUCCESS;
 }

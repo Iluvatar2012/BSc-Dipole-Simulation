@@ -3,7 +3,6 @@
 
 // struct for getting coniguration out of the hdf5 file
 struct parameters {
-
 	int 	N;
 	int 	steps;
 	double* positions;
@@ -14,6 +13,17 @@ struct variables {
 	int 	N;
 
 	double* positions;
+	double* psi4;
+	double* psi6;
+	double* laning;
+};
+
+// struct for passing final data to file
+struct analysis {
+	int 	N;
+	int 	steps;
+	char*	file;
+
 	double* psi4;
 	double* psi6;
 	double* laning;
