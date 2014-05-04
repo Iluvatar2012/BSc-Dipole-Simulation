@@ -145,6 +145,45 @@ void compute_psi6(int l) {
 
 
 /*----------------------------------------------------------------------------------------------------------------------------*/
+void compute_laning(int step) {
+	
+	// basic variables and boxlength
+	double l, l1;
+	double L = sqrt(N/2.);
+
+	// iterate over all particles 
+	for (int i=0; i<N; i++) {
+		// reset the default length to one box length
+		l = L;
+
+		for (int j=0; j<N; j++) {
+			// skip the particle itself and all of the same species
+			if (i==j || i%2 == j%2)
+				continue;
+
+			// check whether the particles are within one lane, this is a lane of 0.25 around the particle
+			if (dabs(config[2*N*step+2*i+1]-config[2*N*step+2*j+1]) < 1/8.) {
+
+				// check whether particle j is to the right of particle i, if not, consider periodic picture
+				if (config[2*N*step + 2*j] < config[2*N*step + 2*i])
+					config[2*N*step + 2*j] += L;
+
+				// store the x-distance between the two particles and the periodic pictures
+				l1 = dabs(config[2*N*step+2*i]-config[2*N*step+2*j]);
+
+				// check if a shorter lane has been found
+				if (l1 < l)
+					l = l1;
+			}
+		}
+
+		// store the value in the laning array
+		laning[N*step+i] = l;
+	}
+}
+
+
+/*----------------------------------------------------------------------------------------------------------------------------*/
 void bubble_sort (double* dist, int* next, int n) {
 
 	// basic variables
@@ -181,49 +220,6 @@ void bubble_sort (double* dist, int* next, int n) {
 
 	} while (switched == 1);
 
-}
-
-
-/*----------------------------------------------------------------------------------------------------------------------------*/
-void compute_laning(int step) {
-
-	// iterate over all particles 
-	for (int i=0; i<N; i++) {
-
-		double l1, l2, l3;
-
-		// set the default length to one box length
-		double L = sqrt(N/2.);
-		double l = L;
-
-		for (int j=0; j<N; j++) {
-			// skip the particle itself
-			if (i==j || i%2 == j%2)
-				continue;
-
-			// check whether the particles are within one lane, this is a lane of 0.25 around the particle
-			if (dabs(config[2*N*step+2*i+1]-config[2*N*step+2*j+1]) < 1/8.) {
-
-				// store the x-distance between the two particles and the periodic pictures
-				l1 = dabs(config[2*N*step+2*i]-config[2*N*step+2*j]);
-				l2 = dabs(config[2*N*step+2*i]-config[2*N*step+2*j]+L);
-				l3 = dabs(config[2*N*step+2*i]-config[2*N*step+2*j]-L);
-
-				// check if a shorter lane has been found
-				if (l1 < l)
-					l = l1;
-
-				if (l2 < l)
-					l = l2;
-
-				if (l3 < l)
-					l = l3;
-			}
-		}
-
-		// store the value in the laning array
-		laning[N*step+i] = l;
-	}
 }
 
 

@@ -1,14 +1,14 @@
-# define output name
-NAME 	:= ../../Work/graphic
+# name the resulting program
+NAME    := ../../Work/statistics
 
-# define necessary libraries
-LIBS 	:= -lm -lhdf5 -lSDL
+# include the necessary libraries and determine basic parameters
+LIBS    := -lm -lhdf5
 
-all: graphic.o hdf5.o picture.o
+all: statistics.o utilities.o hdf5.o 
 	@echo ' '
 	@echo '--------------------------------------------------------------------------------------------------------------------------------------'
-	@echo 'Invoking: GCC C Linker'
-	$(CC) graphic.o hdf5.o picture.o -o $(NAME) $(LIBS)
+	@echo 'Invoking: C Linker'
+	$(CC) -o $(NAME) statistics.o hdf5.o utilities.o $(LIBS)
 	@echo 'Finished building: '$(NAME)
 	@echo ' '
 
@@ -17,13 +17,13 @@ all: graphic.o hdf5.o picture.o
 	rm -rf *.o
 	@echo ' '
 
-graphic.o: graphic.c
+statistics.o: statistics.c
 	@echo '--------------------------------------------------------------------------------------------------------------------------------------'
-	@echo 'Invoking: GCC C Compiler'
-	$(CC) $(CFLAGS) -o graphic.o graphic.c
+	@echo 'Invoking: C Compiler'
+	$(CC) $(CFLAGS) -o statistics.o statistics.c
+
+utilities.o: utilities.c
+	$(CC) $(CFLAGS) -o utilities.o utilities.c
 
 hdf5.o: hdf5.c
 	$(CC) $(CFLAGS) -o hdf5.o hdf5.c
-
-picture.o: picture.c
-	$(CC) $(CFLAGS) -o picture.o picture.c
