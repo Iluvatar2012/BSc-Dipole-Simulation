@@ -74,6 +74,10 @@ void stat_laning () {
 
 		// iterate over all particles
 		for (int j=0; j<N; j++) {
+			// skip all A particles
+			if (j%2 == 0)
+				continue;
+
 			sum 	+= laning[N*i+j];
 			sum_sq	+= laning[N*i+j]*laning[N*i+j];
 
