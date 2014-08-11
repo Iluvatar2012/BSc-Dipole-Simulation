@@ -15,7 +15,7 @@ int main(int argcount, char** argvector) {
 	char outfile[1024];
 	char buf[32];
 
-	int steps;
+	int steps, counter;
 
 	double perc;
 
@@ -44,8 +44,11 @@ int main(int argcount, char** argvector) {
 	// user output
 	fprintf(stderr, "Computing...\n");
 
-	// iterate over all steps, compute filenames and make pictures
-	for (int i=0; i<=steps; i++) {
+	// initiate counter
+	counter = 0;
+
+	// iterate over all 50 steps, compute filenames and make pictures
+	for (int i=0; i<=steps; i+=50) {
 		// compute percentage of completed iterations
 		perc = 100.*i/steps;
 
@@ -68,13 +71,16 @@ int main(int argcount, char** argvector) {
 		// compute the next filename
 		strncpy(outfile, "Movies/image_", 987);
 
-		sprintf(buf, "%d", i);
+		sprintf(buf, "%d", counter);
 		strncat(outfile, buf, 32);
 		strncat(outfile, ".bmp\0", 5);
 
 		// build the picture
 		if (draw_picture(i, outfile, param) != EXIT_SUCCESS)
 			return EXIT_FAILURE;
+
+		// increase counter
+		counter++;
 	}
 
 	// user output
