@@ -2,7 +2,7 @@
 
 // define constants of the simulation
 #define 	N 					1000
-#define		thread_number		8
+#define		thread_number		16
 
 #define 	kT					1.0
 #define		tau_B				1.0
@@ -143,7 +143,7 @@ int init(struct sim_struct *param, double* init_positions) {
 	// compute the force at cutoff value, this force will be deducted from the system
 	force_cutoff	= 3*Gamma_A/(cutoff_squared*cutoff_squared);
 
-	// compute the size of the Verlet list, add 15% as safety margin
+	// compute the size of the Verlet list, add 10% as safety margin
 	N_Verlet = N*PI*cutoff_squared/(L*L);
 	N_Verlet *= 1.1;
 
@@ -218,6 +218,7 @@ int init(struct sim_struct *param, double* init_positions) {
 
 	// initiate Verlet list
 	update_verlet();
+
 	return EXIT_SUCCESS;
 }
 
