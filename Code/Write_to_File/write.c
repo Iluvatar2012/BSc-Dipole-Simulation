@@ -9,11 +9,11 @@
 int main(int argcount, char** argvec) {
 
 	// basic variables
-	char[1024] 	infile;
-	char[1024] 	out_filename;
+	char	infile[1024];
+	char 	out_filename[1024];
 
-	double 		timestep, t;
-	int 		stepsize;
+	double 	timestep, t;
+	int 	stepsize, N;
 
 	// check if the right number of arguments ist given
 	if (argcount != 5) {
@@ -26,7 +26,7 @@ int main(int argcount, char** argvec) {
 	strncpy(out_filename, argvec[2], 1024);
 
 	timestep 	= atof(argvec[3]);
-	steps		= atoi(argvec[4]);
+	stepsize	= atoi(argvec[4]);
 
 	// output to user
 	fprintf(stdout, "Reading file...\n");
@@ -43,6 +43,9 @@ int main(int argcount, char** argvec) {
 
 	fprintf(outfile, "%d # N\n", param->N);
 	fprintf(outfile, "%d # steps\n\n", param->steps);
+
+	// read the amount of particles from the struct
+	N = param->N;
 
 	// print a mask explaining the significance of each value
 	fprintf(outfile, "#time, x, y, disp_x, disp_y, psi_4, psi_6, laning\n\n");

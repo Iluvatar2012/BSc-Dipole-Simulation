@@ -15,7 +15,7 @@ struct parameters *hdf5_read (char* file) {
 	double*	temp;
 	double*	psi4;
 	double* psi6;
-	double* laning
+	double* laning;
 
 	int 	N, steps;
 
