@@ -42,7 +42,7 @@ int main(int argcount, char** argvec) {
 	FILE *outfile = fopen(out_filename, "w+");
 
 	fprintf(outfile, "%d # N\n", param->N);
-	fprintf(outfile, "%d # steps\n\n", param->steps);
+	fprintf(outfile, "%d # steps\n\n", param->steps/stepsize+1);
 
 	// read the amount of particles from the struct
 	N = param->N;

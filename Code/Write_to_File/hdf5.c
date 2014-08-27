@@ -96,7 +96,7 @@ struct parameters *hdf5_read (char* file) {
 	status 		= H5Sclose(tempset_id);
 	status 		= H5Sclose(position_space);
 	status 		= H5Dclose(position_set);
-	status		= H5Dclose(disp_space);
+	status		= H5Sclose(disp_space);
 	status		= H5Dclose(disp_set);
 
 	free(temp);
