@@ -166,7 +166,7 @@ int init(struct sim_struct *param, double* init_positions) {
 
 	// check if successful
 	if((position == NULL) || (displacement == NULL) || (force == NULL) || (verlet == NULL) || (verlet_distance == NULL) || \
-			(threads == NULL) || (borders == NULL) || (numbers == NULL) || (verlet_max == NULL)) {
+		(threads == NULL) || (borders == NULL) || (numbers == NULL) || (verlet_max == NULL)) {
 		fprintf(stderr, "Memory space for fundamentally important arrays could not be allocated.\n");
 		return EXIT_FAILURE;
 	}

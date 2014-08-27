@@ -3,6 +3,7 @@
 *builder
 *picture
 *equaliser
+*write_to_file
 *.hdf5
 *.bmp
 *Results/

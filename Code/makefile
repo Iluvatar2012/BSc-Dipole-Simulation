@@ -49,3 +49,10 @@ all:
 	@echo ' '
 	@echo ' '
 	$(MAKE) -C Statistics/ all
+
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	$(MAKE) -C Write_to_File/ all
