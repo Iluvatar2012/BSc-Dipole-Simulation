@@ -1,7 +1,7 @@
 #!/bin/bash
  
 # number of nodes, nodes per cpu and memory of each cpu
-#PBS -l select=1:ncpus=16:mem=1gb:arch=ivybridge
+#PBS -l select=1:ncpus=8:mem=200gb
 
 # set execution time
 #PBS -l walltime=24:00:00
@@ -11,7 +11,7 @@
 #PBS -M aiko@thphy.uni-duesseldorf.de
 
 # set Job name and project name
-#PBS -N shearing
+#PBS -N analysis
 #PBS -A TP2SHEAR
 
 user=`whoami`
@@ -20,7 +20,6 @@ user=`whoami`
 SCRATCHDIR=/scratch_gs/$USER/$PBS_JOBID
 mkdir -p "$SCRATCHDIR"
 
- 
 #some (useful?) output
 LOGFILE=$PBS_O_WORKDIR/$PBS_JOBNAME"."$PBS_JOBID".log"
 cd $PBS_O_WORKDIR
@@ -39,20 +38,9 @@ echo "RunDir     : "$PBS_O_WORKDIR >> $LOGFILE
 # switch to the (faster) scratch directory
 cd $SCRATCHDIR
 
-# copy a couple of files to the scratchdir
-cp ~/bash_script.sh .
-cp ~/Work/simulation . 
-
-# make a new folder for job log data and for the results
-mkdir Jobs
-mkdir Results
-
-# execute program
-./bash_script.sh $PBS_ARRAY_INDEX
- 
-# copy files back from scratch directory
-cp -r Results/* $PBS_O_WORKDIR/Results/
-cp -r Jobs/* $PBS_O_WORKDIR/Jobs/
+# copy and execute the analysis script
+cp ~/analysis_script.sh . 
+./analysis_script.sh
 
 # change back to working directory
 cd $PBS_O_WORKDIR
