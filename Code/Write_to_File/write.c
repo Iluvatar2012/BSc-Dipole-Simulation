@@ -13,11 +13,11 @@ int main(int argcount, char** argvec) {
 	char 	out_filename[1024];
 
 	double 	timestep, t;
-	int 	stepsize, N;
+	int 	steps, N;
 
 	// check if the right number of arguments ist given
-	if (argcount != 5) {
-		fprintf(stderr, "Please provide a filename, a filename to write to, the timestep of the simulation and the amount of steps between writes. \n");
+	if (argcount != 4) {
+		fprintf(stderr, "Please provide a filename, a filename to write to and the timestep of the simulation. \n");
 		return EXIT_FAILURE;
 	}
 
@@ -26,40 +26,43 @@ int main(int argcount, char** argvec) {
 	strncpy(out_filename, argvec[2], 1024);
 
 	timestep 	= atof(argvec[3]);
-	stepsize	= atoi(argvec[4]);
 
 	// output to user
 	fprintf(stdout, "Reading file...\n");
 	fflush(stdout);
 
 	// read data from file
-	struct parameters *param = hdf5_read(infile);
+	struct parameters *param = hdf5_init(infile);
 
 	// output to user
-	fprintf(stdout, "Finished reading file, there are %d steps for %d particles.\n", param->steps, param->N);
+	fprintf(stdout, "Finished initiating file, there are %d steps for %d particles.\n", param->steps, param->N);
 
 	// open filestream with overwrite attribute and output the simulations basic data
 	FILE *outfile = fopen(out_filename, "w+");
 
 	fprintf(outfile, "%d # N\n", param->N);
-	fprintf(outfile, "%d # steps\n\n", param->steps/stepsize+1);
+	fprintf(outfile, "%d # steps\n\n", param->steps);
 
-	// read the amount of particles from the struct
-	N = param->N;
+	// read the amount of particles and steps from the struct
+	N 		= param->N;
+	steps 	= param->steps;
 
 	// print a mask explaining the significance of each value
 	fprintf(outfile, "#time, x, y, disp_x, disp_y, psi_4, psi_6, laning\n\n");
 
 	// iterate over all wanted times
-	for (int i=0; i<=(param->steps); i+=stepsize) {
+	for (int i=0; i<=steps; i++) {
 
 		// iterate current time
 		t = i*timestep;
 
+		// get the current step
+		hdf5_read();
+
 		// iterate over all particles
 		for (int j=0; j<N; j++) {
-			fprintf(outfile, "%lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", t, param->positions[2*N*i + 2*j], param->positions[2*N*i + 2*j+1], \
-					param->displacement[2*N*i + 2*j], param->displacement[2*N*i + 2*j+1], param->psi4[N*i + j], param->psi6[N*i + j], param->laning[N*i + j]);
+			fprintf(outfile, "%lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", t, param->positions[2*j], param->positions[2*j+1], \
+					param->displacement[2*j], param->displacement[2*j+1], param->psi4[j], param->psi6[j], param->laning[j]);
 		}
 	}
 
