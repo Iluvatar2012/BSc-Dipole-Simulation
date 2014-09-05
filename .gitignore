@@ -6,6 +6,8 @@
 *write_to_file
 *.hdf5
 *.bmp
+*.csv
+*.dat
 *Results/
 */Config_Files/*
 !*/Config_Files/default
