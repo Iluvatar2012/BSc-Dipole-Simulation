@@ -38,7 +38,7 @@ int draw_picture(int step, char* file, struct parameters* param) {
 	atexit(SDL_Quit);
 
 	// set up the screen, this will be our frame, terminate if there was an error
-	screen = SDL_SetVideoMode(600, 600, 16, SDL_HWSURFACE | SDL_DOUBLEBUF);
+	screen = SDL_SetVideoMode(1200, 1200, 16, SDL_HWSURFACE | SDL_DOUBLEBUF);
 	SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 255, 255, 255));
 	if (screen == NULL) {
 		fprintf(stderr, "Could not set video mode: %s\n", SDL_GetError());
@@ -96,18 +96,18 @@ int draw_picture(int step, char* file, struct parameters* param) {
 	// finally draw the current frame
 	for (int i=0; i<N; i++) {
 		// invert the y axis, otherwise (0,0) would be in the top left corner
-		posY = -positions[step*2*N+2*i+1]+L;
+		posY = -positions[2*i+1]+L;
 
 		// set the alpha values of all overlays
-		SDL_SetAlpha(psi_4_A, SDL_SRCALPHA, (int)(255*psi4[step*N+i]));
-		SDL_SetAlpha(psi_4_B, SDL_SRCALPHA, (int)(255*psi4[step*N+i]));
-		SDL_SetAlpha(psi_6_A, SDL_SRCALPHA, (int)(255*psi6[step*N+i]));
-		SDL_SetAlpha(psi_6_B, SDL_SRCALPHA, (int)(255*psi6[step*N+i]));
+		SDL_SetAlpha(psi_4_A, SDL_SRCALPHA, (int)(255*psi4[i]));
+		SDL_SetAlpha(psi_4_B, SDL_SRCALPHA, (int)(255*psi4[i]));
+		SDL_SetAlpha(psi_6_A, SDL_SRCALPHA, (int)(255*psi6[i]));
+		SDL_SetAlpha(psi_6_B, SDL_SRCALPHA, (int)(255*psi6[i]));
 
 		// copy image to screen according to whether we need a red or black dot
 		if (i%2 == 0) {
 			// compute x and y position of each dot
-			dst_even.x = round((positions[step*2*N+2*i]/L) *scrWidth - ball_A->w/2.);
+			dst_even.x = round((positions[2*i]/L) *scrWidth - ball_A->w/2.);
 			dst_even.y = round((posY/L)*scrHeight - ball_A->h/2.);
 			SDL_BlitSurface(ball_A, NULL, screen, &dst_even);
 			SDL_BlitSurface(psi_4_A, NULL, screen, &dst_even);
@@ -115,7 +115,7 @@ int draw_picture(int step, char* file, struct parameters* param) {
 		}
 		else {
 			// compute x and y position of each dot
-			dst_uneven.x = round((positions[step*2*N+2*i]/L) *scrWidth - ball_B->w/2.);
+			dst_uneven.x = round((positions[2*i]/L) *scrWidth - ball_B->w/2.);
 			dst_uneven.y = round((posY/L)*scrHeight - ball_B->h/2.);
 			SDL_BlitSurface(ball_B, NULL, screen, &dst_uneven);
 			SDL_BlitSurface(psi_4_B, NULL, screen, &dst_uneven);

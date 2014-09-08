@@ -6,20 +6,60 @@
 #include "structs.h"
 
 
+// basic variables
+static double* 	positions;
+static double* 	psi4;
+static double* 	psi6;
+
+static int 		N;
+static int 		steps;
+
+// identifiers for files, dataspaces and -sets
+static hid_t	file_id; 
+static hid_t	position_set;
+static hid_t	tempset_id;
+static hid_t	psi4_set;
+static hid_t	psi6_set;
+static hid_t	psi_tempset_id;
+static hid_t	position_space;
+static hid_t	psi4_space;
+static hid_t	psi6_space;
+
+// data dimensions
+static hsize_t	offset[2];
+static hsize_t 	slabdim[2];
+static hsize_t 	psi_offset[1];
+static hsize_t	psi_dim[1];
+
+
 /*----------------------------------------------------------------------------------------------------------------------------*/
-struct parameters *hdf5_read (char* file) {
+void hdf5_read (int curr_step) {
+	// checking variable
+	herr_t	status;
 
-	// basic variables
-	double* positions;
-	double*	temp;
-	double*	psi4;
-	double* psi6;
+	// adjust the current offset
+	offset[0] 		= curr_step;
+	psi_offset[0]	= N*curr_step;
 
-	int 	N, steps;
+	// select the hyperslab and read into position array
+	status 	= H5Sselect_hyperslab(position_space, H5S_SELECT_SET, offset, NULL, slabdim, NULL);
+	status 	= H5Dread(position_set, H5T_NATIVE_DOUBLE, tempset_id, position_space, H5P_DEFAULT, positions);
+	
+	// select the hyperslab and read into psi4 array
+	status	= H5Sselect_hyperslab(psi4_space, H5S_SELECT_SET, psi_offset, NULL, psi_dim, NULL);
+	status	= H5Dread(psi4_set, H5T_NATIVE_DOUBLE, psi_tempset_id, psi4_space, H5P_DEFAULT, psi4);
 
-	// identifiers for files, dataspaces and -sets
-	hid_t	file_id, position_set, tempset_id, psi4_set, psi6_set;
-	hid_t	position_space, attr_write_id, attr_N_id;
+	// select the hyperslab and read into psi6 array
+	status	= H5Sselect_hyperslab(psi6_space, H5S_SELECT_SET, psi_offset, NULL, psi_dim, NULL);
+	status	= H5Dread(psi6_set, H5T_NATIVE_DOUBLE, psi_tempset_id, psi6_space, H5P_DEFAULT, psi6);
+}
+
+
+/*----------------------------------------------------------------------------------------------------------------------------*/
+struct parameters *hdf5_init (char* file) {
+
+
+	hid_t	attr_write_id, attr_N_id;
 	herr_t	status;
 
 	// open file, check if successful
@@ -43,58 +83,32 @@ struct parameters *hdf5_read (char* file) {
 	status 			= H5Aclose(attr_N_id);
 	status 			= H5Aclose(attr_write_id);
 
-	// set dimensions for remainder of data
-	hsize_t	offset[2]	= {0, 0};
-	hsize_t slabdim[2]	= {1, 2*N};
+	// set dimensions for all data
+	offset[0]		= 0;
+	offset[1]		= 0;
+	slabdim[0]		= 1;
+	slabdim[1] 		= 2*N;
 
-	// allocate memory for data
-	positions 		= malloc((steps+1)*2*N*sizeof(double));
-	psi4 			= malloc((steps+1)*N*sizeof(double));
-	psi6 			= malloc((steps+1)*N*sizeof(double));
-
-	temp 			= malloc(2*N*sizeof(double));
-
+	psi_offset[0]	= 0;
+	psi_dim[0]		= N;
 
 	// get the data space of the current dataset and initialize a buffer for reading data
 	position_space	= H5Dget_space(position_set);
 	tempset_id 		= H5Screate_simple(2, slabdim, NULL);
 
-	// iterate over all steps and copy them all into the position array
-	for (int i=0; i<=steps; i++) {
-
-		// adjust offset to the next slab
-		offset[0] = i;
-
-		// select the hyperslab and read into position array
-		status 		= H5Sselect_hyperslab(position_space, H5S_SELECT_SET, offset, NULL, slabdim, NULL);
-		status 		= H5Dread(position_set, H5T_NATIVE_DOUBLE, tempset_id, position_space, H5P_DEFAULT, temp);
-
-		// copy the data from the buffer to the position array
-		for (int j=0; j<2*N; j+=2) {
-			positions[2*N*i + j] 	= temp[j];
-			positions[2*N*i + j+1]	= temp[j+1];
-		}
-	}
-
-	// close these parts of the file, free memory not used any more
-	status 		= H5Sclose(tempset_id);
-	status 		= H5Sclose(position_space);
-	status 		= H5Dclose(position_set);
-
-	free(temp);
-
 	// open datasets for psi values
 	psi4_set	= H5Dopen2(file_id, "/psi4", H5P_DEFAULT);
 	psi6_set	= H5Dopen2(file_id, "/psi6", H5P_DEFAULT);
 
-	// read psi values from file
-	status		= H5Dread(psi4_set, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, psi4);
-	status		= H5Dread(psi6_set, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, psi6);
+	// get the data space of the current psiset and initialize a buffer for reading data
+	psi4_space		= H5Dget_space(psi4_set);
+	psi6_space		= H5Dget_space(psi6_set);
+	psi_tempset_id	= H5Screate_simple(1, psi_dim, NULL);
 
-	// close the rest of the file
-	status 		= H5Dclose(psi4_set);
-	status		= H5Dclose(psi6_set);
-	status		= H5Fclose(file_id);
+	// allocate memory for data
+	positions 		= malloc(2*N*sizeof(double));
+	psi4 			= malloc(N*sizeof(double));
+	psi6 			= malloc(N*sizeof(double));
 
 	// create a struct from all known parameters
 	struct parameters *param = malloc(sizeof(struct parameters));

@@ -32,7 +32,7 @@ int main(int argcount, char** argvector) {
 	fprintf(stderr, "Reading file: %s\n", file);
 
 	// read from the given file, check whether successful
-	struct parameters *param = hdf5_read(file);
+	struct parameters *param = hdf5_init(file);
 
 	if (param == NULL) {
 		return EXIT_FAILURE;
@@ -75,6 +75,9 @@ int main(int argcount, char** argvector) {
 		strncat(outfile, buf, 32);
 		strncat(outfile, ".bmp\0", 5);
 
+		// update position and psi4 array to the next step
+		hdf5_read(i);
+
 		// build the picture
 		if (draw_picture(i, outfile, param) != EXIT_SUCCESS)
 			return EXIT_FAILURE;
@@ -93,5 +96,4 @@ int main(int argcount, char** argvector) {
 	free(param);
 
 	return EXIT_SUCCESS;
-
 }
