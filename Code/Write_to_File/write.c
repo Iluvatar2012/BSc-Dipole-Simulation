@@ -13,11 +13,11 @@ int main(int argcount, char** argvec) {
 	char 	out_filename[1024];
 
 	double 	timestep, t;
-	int 	steps, N;
+	int 	steps, step_size, N;
 
 	// check if the right number of arguments ist given
-	if (argcount != 4) {
-		fprintf(stderr, "Please provide a filename, a filename to write to and the timestep of the simulation. \n");
+	if (argcount != 5) {
+		fprintf(stderr, "Please provide a filename, a filename to write to, the timestep of the simulation and the amount of steps to skip. \n");
 		return EXIT_FAILURE;
 	}
 
@@ -26,6 +26,8 @@ int main(int argcount, char** argvec) {
 	strncpy(out_filename, argvec[2], 1024);
 
 	timestep 	= atof(argvec[3]);
+	step_size	= atoi(argvec[4]);
+
 
 	// output to user
 	fprintf(stdout, "Reading file...\n");
@@ -51,13 +53,13 @@ int main(int argcount, char** argvec) {
 	fprintf(outfile, "#time, x, y, disp_x, disp_y, psi_4, psi_6, laning\n\n");
 
 	// iterate over all wanted times
-	for (int i=0; i<=steps; i++) {
+	for (int i=0; i<=steps; i+=step_size) {
 
 		// iterate current time
 		t = i*timestep;
 
 		// get the current step
-		hdf5_read();
+		hdf5_read(i);
 
 		// iterate over all particles
 		for (int j=0; j<N; j++) {
