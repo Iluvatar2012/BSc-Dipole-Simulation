@@ -19,7 +19,7 @@ set style fill transparent solid 0.4 noborder
 # set labels
 
 # set x and yrange
-set xr [0:0.1]
+set xr [0:100]
 set yr [0:25]
 
 # set labels and lines if necessary
