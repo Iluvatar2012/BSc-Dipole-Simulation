@@ -23,7 +23,7 @@ number.collect! &:to_i;
 steps = number[0];
 
 # open a new file
-out_f = File.new("particle_a_stat", "w");
+out_f = File.new("particle_stat", "w");
 
 # adjust the linenumber
 in_f.readline();
@@ -36,8 +36,12 @@ i = 0;
 while i<steps
 
 	# sum over all A particles y-value and their squares
-	sum = 0;
-	sq_sum = 0;
+	sum_A = 0;
+	sq_sum_A = 0;
+
+	# sum over all A particles y-value and their squares
+	sum_B = 0;
+	sq_sum_B = 0;
 
 	# iterate the current time
 	numbers = line.scan(/\d+.\d+/);
@@ -51,30 +55,51 @@ while i<steps
 		numbers = line.scan(/\d+.\d+/);
 		numbers.collect! &:to_f;
 
-		sum += numbers[2];
-		sq_sum += numbers[2]*numbers[2];
-
-		# jump to the next A particle
-		j+=2;
+		sum_A += numbers[2];
+		sq_sum_A += numbers[2]*numbers[2];
 
 		# adjust the line number
 		in_f.readline();
 		line = in_f.readline();
+
+		# convert the current line to numerals, add y position of current particle to sum and squared sum
+		numbers = line.scan(/\d+.\d+/);
+		numbers.collect! &:to_f;
+
+		sum_B += numbers[2];
+		sq_sum_B += numbers[2]*numbers[2];
+
+		# adjust the line number
+		in_f.readline();
+		line = in_f.readline();
+
+		# jump to the next A particle
+		j+=2;
 	end
 
-	# normalize both sums
-	sum /= N/2;
-	sq_sum /= N/2;
+	# normalize both A sums
+	sum_A /= N/2;
+	sq_sum_A /= N/2;
 
-	# compute standard deviation
-	std_dev = Math.sqrt(sq_sum-sum*sum);
+	# normalize both B sums
+	sum_B /= N/2;
+	sq_sum_B /= N/2;
+
+	# compute standard deviations
+	std_dev_A = Math.sqrt(sq_sum_A-sum_A*sum_A);
+	std_dev_B = Math.sqrt(sq_sum_B-sum_B*sum_B);
+
 
 	# output to file
 	out_f.syswrite(t);
 	out_f.syswrite(", ");
-	out_f.syswrite(sum);
+	out_f.syswrite(sum_A);
 	out_f.syswrite(", ");
-	out_f.syswrite(std_dev);
+	out_f.syswrite(std_dev_A);
+	out_f.syswrite(", ");
+	out_f.syswrite(sum_B);
+	out_f.syswrite(", ");
+	out_f.syswrite(std_dev_B);
 	out_f.syswrite("\n");
 
 	# increment to next step

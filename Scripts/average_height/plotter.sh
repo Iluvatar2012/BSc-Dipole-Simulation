@@ -11,8 +11,10 @@ set output '$1.png'
 set grid
 
 # set linestyle (a little fat in blue) and fillstyle
-set style line 1 lc 3 lw 4
-set style line 2 lc rgb "forest-green"
+set style line 1 lc rgb '#3182bd' lw 4
+set style line 2 lc rgb '#9ecae1'
+set style line 3 lc rgb '#a50f15' lw 4
+set style line 4 lc rgb '#fb6a4a'
 
 set style fill transparent solid 0.4 noborder
 
@@ -27,6 +29,9 @@ set yr [0:25]
 # plot and return to caller, second argument is the actual data
 plot '$2' u 1:2:(\$2-\$3) w filledcurves lines 2 title "", \
 	 '$2' u 1:2:(\$2+\$3) w filledcurves lines 2 title "", \
-	 '$2' u 1:2 w lines lines 1 title ""
+	 '$2' u 1:4:(\$4-\$5) w filledcurves lines 4 title "", \
+	 '$2' u 1:4:(\$4+\$5) w filledcurves lines 4 title "", \
+	 '$2' u 1:2 w lines lines 1 title "", \
+	 '$2' u 1:4 w lines lines 3 title ""
 
 EOF

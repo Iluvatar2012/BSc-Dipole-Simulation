@@ -1,7 +1,8 @@
 #!/bin/bash
 
-FILES=./*.hdf5
-DIR=mean_height_pics
+EXT=.
+FILES=$EXT/*.hdf5
+DIR=$EXT/mean_height_pics
 
 # build a new directory to hold the pictures
 mkdir $DIR
@@ -9,18 +10,18 @@ mkdir $DIR
 # iterate over all files in the given directory
 for F in $FILES
 do 
-	# write data to a temporary file and do a short analysis
-	./write_to_file $F temp 1e-5 1e4
-	./average_part_a.rb temp
+    # write data to a temporary file and do a short analysis
+    ./write_to_file $F temp 0.001 100
+    ./average_part.rb temp
 
-	# compute the basename of the input file
-	TEMP=${F##*/}
-	TEMP=${TEMP%.*}
+    # compute the basename of the input file
+    TEMP=${F##*/}
+    TEMP=${TEMP%.*}
 
-	# plot the data
-	./plotter.sh $DIR/$TEMP particle_a_stat
+    # plot the data
+    ./plotter.sh $DIR/$TEMP particle_stat
 
-	# remove temporary files
-	rm temp
-	rm particle_a_stat
+    # remove temporary files
+    rm temp
+    rm particle_stat
 done
