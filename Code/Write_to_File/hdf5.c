@@ -44,6 +44,11 @@ static herr_t status;
 
 /*----------------------------------------------------------------------------------------------------------------------------*/
 void hdf5_read (int curr_step) {
+
+	// adjust offset to the next slab
+	pos_offset[0] = curr_step;
+	psi_offset[0] = N*curr_step;
+
 	// select the hyperslab and read into position array
 	status 	= H5Sselect_hyperslab(position_space, H5S_SELECT_SET, pos_offset, NULL, posdim, NULL);
 	status 	= H5Dread(position_set, H5T_NATIVE_DOUBLE, tempset_id, position_space, H5P_DEFAULT, positions);
@@ -63,10 +68,6 @@ void hdf5_read (int curr_step) {
 	// select the hyperslab and read into laning array
 	status	= H5Sselect_hyperslab(lane_space, H5S_SELECT_SET, psi_offset, NULL, psi_dim, NULL);
 	status	= H5Dread(lane_set, H5T_NATIVE_DOUBLE, psi_temp_id, lane_space, H5P_DEFAULT, laning);
-
-	// adjust offset to the next slab
-	pos_offset[0] = curr_step;
-	psi_offset[0] = N*curr_step;
 }
 
 
