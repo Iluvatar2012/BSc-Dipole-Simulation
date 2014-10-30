@@ -58,8 +58,7 @@ while i<steps
 		sum_A += numbers[2];
 		sq_sum_A += numbers[2]*numbers[2];
 
-		# adjust the line number
-		in_f.readline();
+		# read the next line
 		line = in_f.readline();
 
 		# convert the current line to numerals, add y position of current particle to sum and squared sum
@@ -69,8 +68,7 @@ while i<steps
 		sum_B += numbers[2];
 		sq_sum_B += numbers[2]*numbers[2];
 
-		# adjust the line number
-		in_f.readline();
+		# read the next line
 		line = in_f.readline();
 
 		# jump to the next A particle
