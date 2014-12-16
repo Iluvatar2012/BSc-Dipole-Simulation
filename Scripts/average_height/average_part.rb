@@ -1,8 +1,5 @@
 #!/usr/bin/env ruby
 
-# basic variables
-bias = 5;
-
 # open new file with argument from console
 in_f = File.new(ARGV[0]);
 
