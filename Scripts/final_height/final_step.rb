@@ -4,8 +4,8 @@
 in_f = File.new(ARGV[0]);
 
 # get additional parameters from console
-m = ARGV([1]);
-G = ARGV([2]);
+m = ARGV[1];
+G = ARGV[2];
 
 # read the first line
 line = in_f.readline();
@@ -23,13 +23,12 @@ in_f.readline();
 in_f.readline();
 in_f.readline();
 in_f.readline();
-in_f.readline();
 
 # skip N lines, this is the first step which shall be ignored
 j=0;
 while j<N
 	in_f.readline();
-	j++;
+	j+=1;
 end
 
 # initiate a couple of variables
@@ -79,20 +78,24 @@ std_dev_A = Math.sqrt(sq_sum_A - sum_A*sum_A);
 std_dev_B = Math.sqrt(sq_sum_B - sum_B*sum_B);
 
 # calculate the difference of the sums and the resulting error
-diff = Math.abs(sum_A - sum_B);
+diff = sum_A - sum_B;
 diff_err = 0;
 
 if (sum_A > sum_B)
 	diff_err = std_dev_A - std_dev_B;
 else
 	diff_err = std_dev_B - std_dev_A;
+end
 
 # output to file
-out_f.syswrite(m);
-out_f.syswrite(", ");
-out_f.syswrite(G);
-out_f.syswrite(", ");
-out_f.syswrite(diff);
-out_f.syswrite(", ");
-out_f.syswrite(diff_err);
-out_f.syswrite("\n");
+out_f.write(m);
+out_f.write(", ");
+out_f.write(G);
+out_f.write(", ");
+out_f.write(diff);
+out_f.write(", ");
+out_f.write(diff_err);
+out_f.write("\n");
+
+# flush to file
+out_f.flush;
