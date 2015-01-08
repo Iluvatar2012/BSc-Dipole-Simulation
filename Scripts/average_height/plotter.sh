@@ -11,8 +11,8 @@ set output '$1.png'
 set grid
 
 # set linestyle (a little fat in blue) and fillstyle
-set style line 1 lc rgb '#3182bd' lw 4
-set style line 2 lc rgb '#9ecae1'
+set style line 1 lc rgb '#08519c' lw 4
+set style line 2 lc rgb '#3182bd'
 set style line 3 lc rgb '#a50f15' lw 4
 set style line 4 lc rgb '#fb6a4a'
 
