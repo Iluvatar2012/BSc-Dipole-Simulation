@@ -18,13 +18,9 @@ set style line 4 lc rgb '#fb6a4a'
 
 set style fill transparent solid 0.4 noborder
 
-# set labels
-
 # set x and yrange
 set xr [0:100]
 set yr [0:25]
-
-# set labels and lines if necessary
 
 # plot and return to caller, second argument is the actual data
 plot '$2' u 1:2:(\$2-\$3) w filledcurves lines 2 title "", \

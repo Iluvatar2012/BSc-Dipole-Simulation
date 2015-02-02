@@ -13,7 +13,7 @@ steplength 	= ARGV[2];
 
 # convert parameters to numerals
 steps		= steps.to_i;
-steplength	= steplength.to_i;
+steplength	= steplength.to_f;
 
 # read the first line
 line = in_f.readline();
@@ -31,7 +31,7 @@ densA = Array.new(y_amount);
 densB = Array.new(y_amount);
 
 # open a new file
-out_f = File.new("density_stat", "a");
+out_f = File.new(ARGV[3], "a");
 
 # adjust the linenumber
 in_f.readline();
@@ -41,7 +41,7 @@ in_f.readline();
 
 # iterate over all steps
 i = 0;
-while i < steps
+while i < steps+1
 
 	# reset the density values 
 	for j in 0..(y_amount-1)
@@ -91,13 +91,16 @@ while i < steps
 		# output to file
 		out_f.syswrite(t);
 		out_f.syswrite(", ");
-		out_f.syswrite((j+0.5)*y_tick);
+		out_f.syswrite(j*y_tick);
 		out_f.syswrite(", ");
 		out_f.syswrite(densA[j]);
 		out_f.syswrite(", ");
 		out_f.syswrite(densB[j]);
 		out_f.syswrite("\n");
 	end
+
+	# include a blank line
+	out_f.syswrite("\n");
 
 	# increase the time value
 	t += steplength;
