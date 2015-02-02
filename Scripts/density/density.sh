@@ -23,13 +23,13 @@ do
 	OUT+=_Gamma_$G
 
 	# read the file and write to plaintext, execute ruby script
-	./write_to_file $F temp 0.001 100
-	./density.rb temp 1000 0.1 density_stat
+	./write_to_file $F /home/ayra/.temp/temp 0.001 100
+	./density.rb /home/ayra/.temp/temp 1000 0.1 /home/ayra/.temp/density_stat
 
 	# call the plotter
-	./plotter.sh $OUT density_stat
+	./plotter.sh $OUT /home/ayra/.temp/density_stat
 
 	# remove the evidence
-	rm temp
-	rm density_stat
+	rm /home/ayra/.temp/temp
+	rm /home/ayra/.temp/density_stat
 done
