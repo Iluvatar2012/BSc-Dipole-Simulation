@@ -69,7 +69,7 @@ int main(int argcount, char** argvector) {
 		fprintf(stderr, "] \t%.1lf%%\r", perc);
 
 		// compute the next filename
-		strncpy(outfile, "Movies/image_", 987);
+		strncpy(outfile, "/home/ayra/.images/image_", 984);
 
 		sprintf(buf, "%d", counter);
 		strncat(outfile, buf, 32);
