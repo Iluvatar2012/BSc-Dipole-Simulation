@@ -126,7 +126,7 @@ int init(struct sim_struct *param, double* init_positions) {
 	// D_Brown_B 			= D_rat*D_Brown_A;
 	D_Brown_B 			= D_Brown_A;
 	// v_A					= v_s/D_Brown_A*kT;
-	v_A					= v_s/D_Brown_A*kT - v_s/D_Brown_B*kT;
+	v_A					= v_s/D_Brown_A*kT - v_s/(D_rat*D_Brown_B*kT);
 	// v_B					= v_s/D_Brown_B*kT;
 	v_B					= 0;
 
