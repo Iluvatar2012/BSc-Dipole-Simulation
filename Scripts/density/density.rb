@@ -88,6 +88,10 @@ while i < steps+1
 	# iterate over all entries of both arrays
 	for j in 0..(y_amount-1)
 
+		# calculate the ratio of densities
+		ratioA = 1.0*densA[j]/(densA[j]+densB[j]);
+		ratioB = 1.0*densB[j]/(densA[j]+densB[j]);
+
 		# output to file
 		out_f.syswrite(t);
 		out_f.syswrite(", ");
@@ -96,6 +100,10 @@ while i < steps+1
 		out_f.syswrite(densA[j]);
 		out_f.syswrite(", ");
 		out_f.syswrite(densB[j]);
+		out_f.syswrite(", ");
+		out_f.syswrite(ratioA);
+		out_f.syswrite(", ");
+		out_f.syswrite(ratioB);
 		out_f.syswrite("\n");
 	end
 

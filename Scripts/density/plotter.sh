@@ -15,7 +15,7 @@ gnuplot <<- EOF
 	set xr [0:100]
 	set yr [0:21.466]
 
-	set cbrange [0:50]
+	set cbrange [0:1]
 
 	# set the used borders and delete the mirrored tics, this makes for a much nicer view
 	set border 10
@@ -24,6 +24,6 @@ gnuplot <<- EOF
 	set ytics nomirror
 
 	# plot the data 
-	splot "$2" u 1:2:3 w pm3d title ""
+	splot "$2" u 1:2:5 w pm3d title ""
 
 EOF

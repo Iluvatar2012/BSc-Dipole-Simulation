@@ -1,13 +1,18 @@
 #!/bin/bash
 
 # Define paths and filenames
-EXT=../Rohdaten/HPC_100_tau_shear_200
+EXT=.
 FILES=$EXT/*.hdf5
-DIR=$EXT/density
+DIR=$EXT
 
-# make the directory if it doesn't exist 
+# make the data directory if it doesn't exist 
 if [ ! -d "$DIR" ]; then
 	mkdir $DIR
+fi
+
+# make a temporary directory in the home folder if it doesn't exist 
+if [ ! -d "/home/ayra/.temp" ]; then
+	mkdir $/home/ayra/.temp
 fi
 
 # iterate over all files in the folder
