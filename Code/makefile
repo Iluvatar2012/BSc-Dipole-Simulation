@@ -13,6 +13,13 @@ all:
 	@echo ' '
 	@echo ' '
 	@echo ' '
+	$(MAKE) -C Simulation_Hard_Walls/ all
+
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	@echo ' '
 	$(MAKE) -C Graphic/ all
 
 	@echo ' '

@@ -36,9 +36,6 @@ static double delta_t;
 static double timestep;
 static int	  max_timesteps;
 
-static double box_A;
-static double box_B;
-
 static int 	  write_step;
 static int 	  sim_number;
 
@@ -57,6 +54,7 @@ static double Li;
 static double v_s;
 static double v_A;
 static double v_B;
+static double kappa;
 
 static double D_Brown_B;
 static double D_rat;
@@ -121,6 +119,9 @@ int init(struct sim_struct *param, double* init_positions) {
 	L 	= sqrt(N/2.);	// N_A = N/2.;
 	Li 	= 1.0/L;
 
+	// set the interaction potential for the walls
+	kappa = 100;
+
 	// compute diffusion value of particle B, compute box speeds for particles A and B
 	// D_Brown_B 			= D_rat*D_Brown_A;
 	D_Brown_B 			= D_Brown_A;
@@ -134,9 +135,6 @@ int init(struct sim_struct *param, double* init_positions) {
 
 	weigh_brown_A 		= sqrt(2.0 * D_Brown_A * delta_t);
 	weigh_brown_B 		= sqrt(2.0 * D_Brown_B * delta_t);
-
-	box_A				= 0;
-	box_B				= 0;
 
 	cutoff 				= (L/2.0);
 	cutoff_squared 		= cutoff*cutoff;
@@ -263,9 +261,6 @@ static void *iteration (int *no) {
 	double shear_one;
 	double shear_two;
 
-	double* box_one;
-	double* box_two;
-
 	double m_j;
 
 	if (min%2 == 0){
@@ -279,10 +274,6 @@ static void *iteration (int *no) {
 
 		D_kT_one = D_Brown_A/kT;
 		D_kT_two = D_Brown_B/kT;
-
-		// assign the right box displacement parameter
-		box_one = &box_A;
-		box_two = &box_B;
 
 		// shear_one = v_s / (D_kT_one * L) * delta_t;
 		// shear_two = v_s / (D_kT_two * L) * delta_t;
@@ -300,10 +291,6 @@ static void *iteration (int *no) {
 
 		D_kT_one = D_Brown_B/kT;
 		D_kT_two = D_Brown_A/kT;
-
-		// assign the right box displacement parameter
-		box_one = &box_B;
-		box_two = &box_A;
 
 		// shear_one = v_s / (D_kT_one * L) * delta_t;
 		// shear_two = v_s / (D_kT_two * L) * delta_t;
@@ -323,6 +310,9 @@ static void *iteration (int *no) {
 			force[2*i]	 = 0;
 			force[2*i+1] = 0;
 
+			// add the potential for the walls
+			force[2*i+1] += Gamma_A/kappa *(exp(-kappa*yi)*(1/yi + 1/(yi*yi)) + exp(-kappa*(yi-L))*(1/(yi-L) + 1/((yi-L)*(yi-L))));
+
 			// get the amount of particles we have to iterate
 			iterate = verlet[N_Verlet*(i+1)-1];
 
@@ -340,13 +330,8 @@ static void *iteration (int *no) {
 				dx = xi - xj;
 				dy = yi - yj;
 
-				// alter dx, this accounts for Lees-Edwards conditions
-				sig_y 	=  dround(dy*Li);
-				dx 		+= sig_y * (*box_one);
-
  				// find images through altering dx and dy
 				dx 		-= dround(dx*Li)*L;
-				dy		-= sig_y * L;
 
 				// get square of distance and compute force in x and y direction
 				r_squared = dx*dx + dy*dy;
@@ -367,6 +352,9 @@ static void *iteration (int *no) {
 			force[2*i]	 = 0;
 			force[2*i+1] = 0;
 
+			// add the potential for the walls
+			force[2*i+1] += Gamma_A/kappa *(exp(-kappa*yi)*(1/yi + 1/(yi*yi)) + exp(-kappa*(yi-L))*(1/(yi-L) + 1/((yi-L)*(yi-L))));
+
 			// get the amount of particles we have to iterate
 			iterate = verlet[N_Verlet*(i+1)-1];
 
@@ -384,13 +372,8 @@ static void *iteration (int *no) {
 				dx = xi - xj;
 				dy = yi - yj;
 
-				// alter dx, this accounts for Lees-Edwards conditions
-				sig_y 	=  dround(dy*Li);
-				dx 		+= sig_y * (*box_two);
-
  				// find images through altering dx and dy
 				dx		-= dround(dx*Li)*L;
-				dy		-= sig_y * L;
 
 				// get square of distance and compute force in x and y direction
 				r_squared = dx*dx + dy*dy;
@@ -445,10 +428,6 @@ static void *iteration (int *no) {
 
 			// Calculate x positions with periodic boundary conditions, check whether the particle moved from one row to another
 			position[2*i] 	-= floor(position[2*i]*Li)*L;
-			position[2*i]	-= (floor((position[2*i+1]+L)*Li)-1)*(*box_one); // WTF?!?
-
-			// Calculate y positions with periodic boundary conditions
-			position[2*i+1] -= floor(position[2*i+1]*Li)*L;
 		}
 
 		// compute new positions for particles B from forces, remember periodic boundary conditions
@@ -492,10 +471,6 @@ static void *iteration (int *no) {
 
 			// Calculate x positions with periodic boundary conditions, check whether the particle moved from one row to another
 			position[2*i] 	-= floor(position[2*i]*Li)*L;
-			position[2*i]	-= (floor((position[2*i+1]+L)*Li)-1)*(*box_two);
-
-			// Calculate y positions with periodic boundary conditions
-			position[2*i+1] -= floor(position[2*i+1]*Li)*L;
 		}
 
 		// Signal to main thread, that all threads have finished their iteration
@@ -606,18 +581,6 @@ void simulation (void) {
 			}
 		}
 
-		// adjust orientation of upper and lower box row for both particle species
-		box_A += v_A*delta_t;
-		box_B += v_B*delta_t;
-
-		// readjust box_A orientation when necessary
-		if ((box_A - box_B) > 0.5)
-			box_A -= 1;
-
-		// implement periodic boundary conditions
-		box_A -= floor(box_A*Li)*L;
-		box_B -= floor(box_B*Li)*L;
-
 		// check if verlet list has to be updated
 		if ((verlet_max_1+verlet_max_2) > d_cutoff_verlet) {
 			update_verlet();
@@ -710,7 +673,7 @@ void update_verlet (void) {
 		// save the amount of neighbors to particle i in k
 		k = 0;
 
-		for (int j=0; j<N; j+=2) {
+		for (int j=0; j<N; j++) {
 
 			// ignore entry where particle i itself is inspected
 			if (i == j)
@@ -724,53 +687,8 @@ void update_verlet (void) {
 			dx = xi - xj;
 			dy = yi - yj;
 
-			// alter dx, this accounts for Lees-Edwards conditions
-			sig_y 	= dround(dy*Li);
-			dx 		+= sig_y * box_A;
-
  			// find images through altering dx and dy
 			dx -= dround(dx*Li)*L;
-			dy -= sig_y * L;
-
-			// find out squared distance and check against the verlet cutoff
-			r_squared = dx*dx + dy*dy;
-
-			// squaring is a strict monotonous function, thus we can check with the squares of the values (saves N*N sqrt()-calls)
-			if(cutoff_squared >= r_squared) {
-				// check whether there is enough space in the verlet list
-				if (k == N_Verlet -1) {
-					fprintf(stderr, "Verlet list is too short!!\n");
-					fprintf(stderr, "N: %d, N_Verlet: %d, k: %d\n", N, N_Verlet, k);
-					exit(EXIT_FAILURE);
-				}
-
-				// add neighbor and signums into verlet and sign list
-				verlet[N_Verlet*i+k] 	= j;
-				k++;
-			}
-		}
-
-		for (int j=1; j<N; j+=2) {
-
-			// ignore entry where particle i itself is inspected
-			if (i == j)
-				continue;
-
-			// get the position of particle j
-			xj = position[2*j];
-			yj = position[2*j+1];
-
-			// get the distance between both particles
-			dx = xi - xj;
-			dy = yi - yj;
-
-			// alter dx, this accounts for Lees-Edwards conditions
-			sig_y 	= dround(dy*Li);
-			dx 		+= sig_y * box_B;
-
- 			// find images through altering dx and dy
-			dx -= dround(dx*Li)*L;
-			dy -= sig_y * L;
 
 			// find out squared distance and check against the verlet cutoff
 			r_squared = dx*dx + dy*dy;
