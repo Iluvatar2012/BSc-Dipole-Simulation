@@ -126,7 +126,7 @@ int init(struct sim_struct *param, double* init_positions) {
 	// D_Brown_B 			= D_rat*D_Brown_A;
 	D_Brown_B 			= D_Brown_A;
 	// v_A					= v_s/D_Brown_A*kT;
-	v_A					= v_s/D_Brown_A*kT - v_s/(D_rat*D_Brown_B*kT);
+	v_A					= v_s/D_Brown_A*kT - v_s/(D_rat*D_Brown_B)*kT;
 	// v_B					= v_s/D_Brown_B*kT;
 	v_B					= 0;
 
@@ -219,13 +219,6 @@ int init(struct sim_struct *param, double* init_positions) {
 	// initiate Verlet list
 	update_verlet();
 
-	fprintf(stderr, "D_A: %lf\n", D_Brown_A);
-	fprintf(stderr, "D_B: %lf\n", D_Brown_B);
-	fprintf(stderr, "v_A: %lf\n", v_A);
-	fprintf(stderr, "v_B: %lf\n", v_B);
-
-
-
 	return EXIT_SUCCESS;
 }
 
@@ -311,7 +304,8 @@ static void *iteration (int *no) {
 			force[2*i+1] = 0;
 
 			// add the potential for the walls
-			force[2*i+1] += Gamma_A/kappa *(exp(-kappa*yi)*(1/yi + 1/(yi*yi)) + exp(-kappa*(yi-L))*(1/(yi-L) + 1/((yi-L)*(yi-L))));
+			force[2*i+1] += Gamma_A/kappa *(kappa/(fabs(yi)+1e-20) + 1/(yi*yi+1e-20))*exp(-kappa*yi);
+			force[2*i+1] += -Gamma_A/kappa *(kappa/(fabs(L-yi)+1e-20) + 1/((L-yi)*(L-yi)+1e-20))*exp(-kappa*(L-yi));
 
 			// get the amount of particles we have to iterate
 			iterate = verlet[N_Verlet*(i+1)-1];
@@ -352,8 +346,9 @@ static void *iteration (int *no) {
 			force[2*i]	 = 0;
 			force[2*i+1] = 0;
 
-			// add the potential for the walls
-			force[2*i+1] += Gamma_A/kappa *(exp(-kappa*yi)*(1/yi + 1/(yi*yi)) + exp(-kappa*(yi-L))*(1/(yi-L) + 1/((yi-L)*(yi-L))));
+			// add the potential for the walls, account for a minimum value larger than zero
+			force[2*i+1] += Gamma_A/kappa *(kappa/(fabs(yi)+1e-20) + 1/(yi*yi+1e-20))*exp(-kappa*yi);
+			force[2*i+1] += -Gamma_A/kappa *(kappa/(fabs(L-yi)+1e-20) + 1/((L-yi)*(L-yi)+1e-20))*exp(-kappa*(L-yi));
 
 			// get the amount of particles we have to iterate
 			iterate = verlet[N_Verlet*(i+1)-1];

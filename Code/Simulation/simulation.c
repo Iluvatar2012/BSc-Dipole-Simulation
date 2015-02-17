@@ -125,7 +125,7 @@ int init(struct sim_struct *param, double* init_positions) {
 	// D_Brown_B 			= D_rat*D_Brown_A;
 	D_Brown_B 			= D_Brown_A;
 	// v_A					= v_s/D_Brown_A*kT;
-	v_A					= v_s/D_Brown_A*kT - v_s/(D_rat*D_Brown_B*kT);
+	v_A					= v_s/D_Brown_A*kT - v_s/(D_rat*D_Brown_B)*kT;
 	// v_B					= v_s/D_Brown_B*kT;
 	v_B					= 0;
 
@@ -220,13 +220,6 @@ int init(struct sim_struct *param, double* init_positions) {
 
 	// initiate Verlet list
 	update_verlet();
-
-	fprintf(stderr, "D_A: %lf\n", D_Brown_A);
-	fprintf(stderr, "D_B: %lf\n", D_Brown_B);
-	fprintf(stderr, "v_A: %lf\n", v_A);
-	fprintf(stderr, "v_B: %lf\n", v_B);
-
-
 
 	return EXIT_SUCCESS;
 }
@@ -615,8 +608,10 @@ void simulation (void) {
 			box_A -= 1;
 
 		// implement periodic boundary conditions
-		box_A -= floor(box_A*Li)*L;
+		box_A -= floor(box_B*Li)*L;
 		box_B -= floor(box_B*Li)*L;
+
+		fprintf(stderr, "Time: %d\tBoxes: %lf, %lf\n", timesteps, box_A, box_B);
 
 		// check if verlet list has to be updated
 		if ((verlet_max_1+verlet_max_2) > d_cutoff_verlet) {
