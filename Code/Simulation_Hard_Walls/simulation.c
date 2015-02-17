@@ -256,6 +256,9 @@ static void *iteration (int *no) {
 
 	double m_j;
 
+	double dist_bottom;
+	double dist_top;
+
 	if (min%2 == 0){
 		// get the relation of all even values, this is basically the interaction relation this particle will have with other particles
 		m_i_one = 1.0;
@@ -303,9 +306,22 @@ static void *iteration (int *no) {
 			force[2*i]	 = 0;
 			force[2*i+1] = 0;
 
+			// check that the distance to the bottom is not too small
+			if (yi <= 0)
+				dist_bottom = 1e-6;
+			else
+				dist_bottom = yi;
+
+			// check that the distance to the top is not too small
+			if (yi >= L)
+				dist_top = 1e-6;
+			else
+				dist_top = L-yi;
+
+
 			// add the potential for the walls
-			force[2*i+1] += Gamma_A/kappa *(kappa/(fabs(yi)+1e-20) + 1/(yi*yi+1e-20))*exp(-kappa*yi);
-			force[2*i+1] += -Gamma_A/kappa *(kappa/(fabs(L-yi)+1e-20) + 1/((L-yi)*(L-yi)+1e-20))*exp(-kappa*(L-yi));
+			force[2*i+1] += Gamma_A/kappa *(kappa/(dist_bottom) + 1/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+			force[2*i+1] += -Gamma_A/kappa *(kappa/(dist_top) + 1/(dist_top*dist_top))*exp(-kappa*dist_top);
 
 			// get the amount of particles we have to iterate
 			iterate = verlet[N_Verlet*(i+1)-1];
@@ -346,9 +362,22 @@ static void *iteration (int *no) {
 			force[2*i]	 = 0;
 			force[2*i+1] = 0;
 
-			// add the potential for the walls, account for a minimum value larger than zero
-			force[2*i+1] += Gamma_A/kappa *(kappa/(fabs(yi)+1e-20) + 1/(yi*yi+1e-20))*exp(-kappa*yi);
-			force[2*i+1] += -Gamma_A/kappa *(kappa/(fabs(L-yi)+1e-20) + 1/((L-yi)*(L-yi)+1e-20))*exp(-kappa*(L-yi));
+			// check that the distance to the bottom is not too small
+			if (yi <= 0)
+				dist_bottom = 1e-6;
+			else
+				dist_bottom = yi;
+
+			// check that the distance to the top is not too small
+			if (yi >= L)
+				dist_top = 1e-6;
+			else
+				dist_top = L-yi;
+
+
+			// add the potential for the walls
+			force[2*i+1] += Gamma_A/kappa *(kappa/(dist_bottom) + 1/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+			force[2*i+1] += -Gamma_A/kappa *(kappa/(dist_top) + 1/(dist_top*dist_top))*exp(-kappa*dist_top);
 
 			// get the amount of particles we have to iterate
 			iterate = verlet[N_Verlet*(i+1)-1];
