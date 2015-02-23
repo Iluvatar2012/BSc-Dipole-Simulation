@@ -611,8 +611,6 @@ void simulation (void) {
 		box_A -= floor(box_B*Li)*L;
 		box_B -= floor(box_B*Li)*L;
 
-		fprintf(stderr, "Time: %d\tBoxes: %lf, %lf\n", timesteps, box_A, box_B);
-
 		// check if verlet list has to be updated
 		if ((verlet_max_1+verlet_max_2) > d_cutoff_verlet) {
 			update_verlet();
