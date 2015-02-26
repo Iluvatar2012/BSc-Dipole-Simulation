@@ -120,7 +120,7 @@ int init(struct sim_struct *param, double* init_positions) {
 	Li 	= 1.0/L;
 
 	// set the interaction potential for the walls
-	kappa = 100;
+	kappa = 10;
 
 	// compute diffusion value of particle B, compute box speeds for particles A and B
 	// D_Brown_B 			= D_rat*D_Brown_A;
@@ -307,17 +307,22 @@ static void *iteration (int *no) {
 			force[2*i+1] = 0;
 
 			// check that the distance to the bottom is not too small
-			if (yi <= 0)
+			if (yi <= 1e-6)
 				dist_bottom = 1e-6;
 			else
 				dist_bottom = yi;
 
 			// check that the distance to the top is not too small
-			if (yi >= L)
+			if (yi >= L - 1e-6)
 				dist_top = 1e-6;
 			else
 				dist_top = L-yi;
 
+
+			//fprintf(stderr, "%lf, %lf\n", dist_bottom, dist_top);
+
+			if (yi <= 0 || yi >= L)
+				fprintf(stderr, "%lf\n", yi);
 
 			// add the potential for the walls
 			force[2*i+1] += Gamma_A/kappa *(kappa/(dist_bottom) + 1/(dist_bottom*dist_bottom))*exp(-kappa*yi);
@@ -363,17 +368,16 @@ static void *iteration (int *no) {
 			force[2*i+1] = 0;
 
 			// check that the distance to the bottom is not too small
-			if (yi <= 0)
+			if (yi <= 1e-6)
 				dist_bottom = 1e-6;
 			else
 				dist_bottom = yi;
 
 			// check that the distance to the top is not too small
-			if (yi >= L)
+			if (yi >= L - 1e-6)
 				dist_top = 1e-6;
 			else
 				dist_top = L-yi;
-
 
 			// add the potential for the walls
 			force[2*i+1] += Gamma_A/kappa *(kappa/(dist_bottom) + 1/(dist_bottom*dist_bottom))*exp(-kappa*yi);
@@ -711,7 +715,7 @@ void update_verlet (void) {
 			dx = xi - xj;
 			dy = yi - yj;
 
- 			// find images through altering dx and dy
+ 			// find images through altering dx
 			dx -= dround(dx*Li)*L;
 
 			// find out squared distance and check against the verlet cutoff

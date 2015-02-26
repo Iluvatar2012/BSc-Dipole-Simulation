@@ -1,5 +1,5 @@
 Dipole interaction relation (Gamma_A)	: 10.0
-Particle dipole ratio (m)				: 0.5
+Particle dipole ratio (m)				: 1.0
 Shear rate A (shear_A)               	: 500.0
 Particle Diffusion ratio (D_rat)		: 1.7
 Time difference (delta_t)            	: 0.000001
