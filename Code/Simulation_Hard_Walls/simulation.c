@@ -120,7 +120,7 @@ int init(struct sim_struct *param, double* init_positions) {
 	Li 	= 1.0/L;
 
 	// set the interaction potential for the walls
-	kappa = 10;
+	kappa = 100;
 
 	// compute diffusion value of particle B, compute box speeds for particles A and B
 	// D_Brown_B 			= D_rat*D_Brown_A;
@@ -378,6 +378,10 @@ static void *iteration (int *no) {
 				dist_top = 1e-6;
 			else
 				dist_top = L-yi;
+
+
+			if (yi <= 0 || yi >= L)
+				fprintf(stderr, "%lf\n", yi);
 
 			// add the potential for the walls
 			force[2*i+1] += Gamma_A/kappa *(kappa/(dist_bottom) + 1/(dist_bottom*dist_bottom))*exp(-kappa*yi);
