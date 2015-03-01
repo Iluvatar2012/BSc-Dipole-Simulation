@@ -144,8 +144,8 @@ int init(struct sim_struct *param, double* init_positions) {
 	force_cutoff	= 3*Gamma_A/(cutoff_squared*cutoff_squared);
 
 	// compute the size of the Verlet list, add 10% as safety margin
-	N_Verlet = N*PI*cutoff_squared/(L*L);
-	N_Verlet *= 1.1;
+	N_Verlet = N;//*PI*cutoff_squared/(L*L);
+	//N_Verlet *= 1.1;
 
 	// check whether an old configuration of data can be used or whether new memory has to be allocated
 	if (init_positions != NULL) {
