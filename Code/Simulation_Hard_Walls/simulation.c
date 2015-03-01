@@ -120,7 +120,7 @@ int init(struct sim_struct *param, double* init_positions) {
 	Li 	= 1.0/L;
 
 	// set the interaction potential for the walls
-	kappa = 10;
+	kappa = 100.0;
 
 	// compute diffusion value of particle B, compute box speeds for particles A and B
 	// D_Brown_B 			= D_rat*D_Brown_A;
@@ -307,20 +307,20 @@ static void *iteration (int *no) {
 			force[2*i+1] = 0;
 
 			// check that the distance to the bottom is not too small
-			if (yi <= 1e-8)
-				dist_bottom = 1e-8;
+			if (yi <= 1e-6)
+				dist_bottom = 1e-6;
 			else
 				dist_bottom = yi;
 
 			// check that the distance to the top is not too small
-			if (yi >= L - 1e-8)
-				dist_top = 1e-8;
+			if (yi >= L - 1e-6)
+				dist_top = 1e-6;
 			else
 				dist_top = L-yi;
 
 			// add the potential for the walls
-			force[2*i+1] += Gamma_A/kappa *(kappa/(dist_bottom) + 1/(dist_bottom*dist_bottom))*exp(-kappa*yi);
-			force[2*i+1] -= Gamma_A/kappa *(kappa/(dist_top) + 1/(dist_top*dist_top))*exp(-kappa*dist_top);
+			force[2*i+1] += 1.0*Gamma_A/kappa *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+			force[2*i+1] -= 1.0*Gamma_A/kappa *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
 
 			// get the amount of particles we have to iterate
 			iterate = verlet[N_Verlet*(i+1)-1];
@@ -362,20 +362,20 @@ static void *iteration (int *no) {
 			force[2*i+1] = 0;
 
 			// check that the distance to the bottom is not too small
-			if (yi <= 1e-8)
-				dist_bottom = 1e-8;
+			if (yi <= 1e-6)
+				dist_bottom = 1e-6;
 			else
 				dist_bottom = yi;
 
 			// check that the distance to the top is not too small
-			if (yi >= L - 1e-8)
-				dist_top = 1e-8;
+			if (yi >= L - 1e-6)
+				dist_top = 1e-6;
 			else
 				dist_top = L-yi;
 
 			// add the potential for the walls
-			force[2*i+1] += Gamma_A/kappa *(kappa/(dist_bottom) + 1/(dist_bottom*dist_bottom))*exp(-kappa*yi);
-			force[2*i+1] -= Gamma_A/kappa *(kappa/(dist_top) + 1/(dist_top*dist_top))*exp(-kappa*dist_top);
+			force[2*i+1] += 1.0*Gamma_A/kappa *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+			force[2*i+1] -= 1.0*Gamma_A/kappa *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
 
 			// get the amount of particles we have to iterate
 			iterate = verlet[N_Verlet*(i+1)-1];
