@@ -120,7 +120,7 @@ int init(struct sim_struct *param, double* init_positions) {
 	Li 	= 1.0/L;
 
 	// set the interaction potential for the walls
-	kappa = 100.0;
+	kappa = 1.0;
 
 	// compute diffusion value of particle B, compute box speeds for particles A and B
 	// D_Brown_B 			= D_rat*D_Brown_A;
@@ -208,7 +208,7 @@ int init(struct sim_struct *param, double* init_positions) {
 				dy = position[j+1] 	- position[i+1];
 
 				// check whether the minimum distance of particles is met, break loop if not
-				if (dx*dx+dy*dy < minDist*minDist || position[i+1] < 1.0 || position[i+1] > L-1.0) {
+				if (dx*dx+dy*dy < minDist*minDist || position[i+1] < 4.0 || position[i+1] > L-4.0) {
 					done = 0;
 					break;
 				}
@@ -228,7 +228,7 @@ int init(struct sim_struct *param, double* init_positions) {
 static void *iteration (int *no) {
 	// Define necessary variables
 	double xi, xj, yi, yj;
-	double dx, dy, sig_y;
+	double dx, dy;
 	double r_squared;
 
 	double temp_force;
@@ -258,6 +258,10 @@ static void *iteration (int *no) {
 
 	double dist_bottom;
 	double dist_top;
+
+	// cutoff for the walls force, this will lead to a smoother transition
+	double dist_cutoff 			= 3.0;
+	double force_wall_cutoff 	= 1.0*Gamma_A/kappa *(kappa/dist_cutoff + 1.0/(dist_cutoff*dist_cutoff))*exp(-kappa*dist_cutoff);
 
 	if (min%2 == 0){
 		// get the relation of all even values, this is basically the interaction relation this particle will have with other particles
@@ -307,20 +311,24 @@ static void *iteration (int *no) {
 			force[2*i+1] = 0;
 
 			// check that the distance to the bottom is not too small
-			if (yi <= 1e-6)
-				dist_bottom = 1e-6;
-			else
+			if (yi <= 1e-12) {
+				dist_bottom = 1e-12;
+				force[2*i+1] += 1.0*Gamma_A/kappa *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			}
+			else if (yi <= dist_cutoff) {
 				dist_bottom = yi;
+				force[2*i+1] += 1.0*Gamma_A/kappa *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			}
 
 			// check that the distance to the top is not too small
-			if (yi >= L - 1e-6)
-				dist_top = 1e-6;
-			else
+			if (L - yi <= 1e-12) {
+				dist_top = 1e-12;
+				force[2*i+1] -= 1.0*Gamma_A/kappa *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
+			}
+			else if (L - yi <= dist_cutoff) {
 				dist_top = L-yi;
-
-			// add the potential for the walls
-			force[2*i+1] += 1.0*Gamma_A/kappa *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
-			force[2*i+1] -= 1.0*Gamma_A/kappa *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+				force[2*i+1] -= 1.0*Gamma_A/kappa *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
+			}
 
 			// get the amount of particles we have to iterate
 			iterate = verlet[N_Verlet*(i+1)-1];
@@ -362,20 +370,24 @@ static void *iteration (int *no) {
 			force[2*i+1] = 0;
 
 			// check that the distance to the bottom is not too small
-			if (yi <= 1e-6)
-				dist_bottom = 1e-6;
-			else
+			if (yi <= 1e-12) {
+				dist_bottom = 1e-12;
+				force[2*i+1] += 1.0*Gamma_A/kappa *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			}
+			else if (yi <= dist_cutoff) {
 				dist_bottom = yi;
+				force[2*i+1] += 1.0*Gamma_A/kappa *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			}
 
 			// check that the distance to the top is not too small
-			if (yi >= L - 1e-6)
-				dist_top = 1e-6;
-			else
+			if (L - yi <= 1e-12) {
+				dist_top = 1e-12;
+				force[2*i+1] -= 1.0*Gamma_A/kappa *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
+			}
+			else if (L - yi <= dist_cutoff) {
 				dist_top = L-yi;
-
-			// add the potential for the walls
-			force[2*i+1] += 1.0*Gamma_A/kappa *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
-			force[2*i+1] -= 1.0*Gamma_A/kappa *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+				force[2*i+1] -= 1.0*Gamma_A/kappa *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
+			}
 
 			// get the amount of particles we have to iterate
 			iterate = verlet[N_Verlet*(i+1)-1];
@@ -681,7 +693,7 @@ void simulation (void) {
 void update_verlet (void) {
 	// define necessary variables: i, j and temporary position variables,
 	double xi, yi, xj, yj;
-	double dx, dy, sig_y;
+	double dx, dy;
 	double r_squared;
 
 	// count how many values there are in the list
