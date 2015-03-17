@@ -120,7 +120,7 @@ int init(struct sim_struct *param, double* init_positions) {
 	Li 	= 1.0/L;
 
 	// set the interaction potential for the walls
-	kappa = 1.0;
+	kappa = 10.0;
 
 	// compute diffusion value of particle B, compute box speeds for particles A and B
 	// D_Brown_B 			= D_rat*D_Brown_A;
@@ -261,7 +261,8 @@ static void *iteration (int *no) {
 
 	// cutoff for the walls force, this will lead to a smoother transition
 	double dist_cutoff 			= 3.0;
-	double force_wall_cutoff 	= 1.0*Gamma_A/kappa *(kappa/dist_cutoff + 1.0/(dist_cutoff*dist_cutoff))*exp(-kappa*dist_cutoff);
+	double prefactor			= pow(Gamma_A, 4.0)/kappa;
+	double force_wall_cutoff 	= 1.0*prefactor *(kappa/dist_cutoff + 1.0/(dist_cutoff*dist_cutoff))*exp(-kappa*dist_cutoff);
 
 	if (min%2 == 0){
 		// get the relation of all even values, this is basically the interaction relation this particle will have with other particles
@@ -313,22 +314,30 @@ static void *iteration (int *no) {
 			// check that the distance to the bottom is not too small
 			if (yi <= 1e-12) {
 				dist_bottom = 1e-12;
-				force[2*i+1] += 1.0*Gamma_A/kappa *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+				force[2*i+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
 			}
 			else if (yi <= dist_cutoff) {
 				dist_bottom = yi;
-				force[2*i+1] += 1.0*Gamma_A/kappa *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+				force[2*i+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
 			}
 
 			// check that the distance to the top is not too small
 			if (L - yi <= 1e-12) {
 				dist_top = 1e-12;
-				force[2*i+1] -= 1.0*Gamma_A/kappa *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
+				force[2*i+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
 			}
 			else if (L - yi <= dist_cutoff) {
 				dist_top = L-yi;
-				force[2*i+1] -= 1.0*Gamma_A/kappa *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
+				force[2*i+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
 			}
+
+			if (yi <= 0) {
+				fprintf(stderr, "%d: \t%lf\t%lf\t%lf\n", i, yi, dist_bottom, force[2*i+1]);
+			}
+			if (yi >= L) {
+				fprintf(stderr, "%d: \t%lf\t%lf\t%lf\t%lf\n", i, yi, dist_top, force[2*i+1], L);
+			}
+
 
 			// get the amount of particles we have to iterate
 			iterate = verlet[N_Verlet*(i+1)-1];
@@ -372,21 +381,28 @@ static void *iteration (int *no) {
 			// check that the distance to the bottom is not too small
 			if (yi <= 1e-12) {
 				dist_bottom = 1e-12;
-				force[2*i+1] += 1.0*Gamma_A/kappa *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+				force[2*i+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
 			}
 			else if (yi <= dist_cutoff) {
 				dist_bottom = yi;
-				force[2*i+1] += 1.0*Gamma_A/kappa *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+				force[2*i+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
 			}
 
 			// check that the distance to the top is not too small
 			if (L - yi <= 1e-12) {
 				dist_top = 1e-12;
-				force[2*i+1] -= 1.0*Gamma_A/kappa *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
+				force[2*i+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
 			}
 			else if (L - yi <= dist_cutoff) {
 				dist_top = L-yi;
-				force[2*i+1] -= 1.0*Gamma_A/kappa *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
+				force[2*i+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
+			}
+
+			if (yi <= 0) {
+				fprintf(stderr, "%d: \t%lf\t%lf\t%lf\n", i, yi, dist_bottom, force[2*i+1]);
+			}
+			if (yi >= L) {
+				fprintf(stderr, "%d: \t%lf\t%lf\t%lf\t%lf\n", i, yi, dist_top, force[2*i+1], L);
 			}
 
 			// get the amount of particles we have to iterate
