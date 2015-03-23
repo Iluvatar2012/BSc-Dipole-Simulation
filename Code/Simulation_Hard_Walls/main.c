@@ -171,6 +171,10 @@ int main(int argcount, char** argvektor) {
 		strncpy(infile, argvektor[1], length);
 		sim_number = atoi(argvektor[2]);
 		init_positions = NULL;
+	} else if (argcount == 2) {
+		strncpy(infile, argvektor[1], length);
+		sim_number = 0;
+		init_positions = NULL;
 	} else {
 		strncpy(infile,"Config_Files/default", length);		// default
 		sim_number = 0;
