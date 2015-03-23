@@ -120,7 +120,7 @@ int init(struct sim_struct *param, double* init_positions) {
 	Li 	= 1.0/L;
 
 	// set the interaction potential for the walls
-	kappa = 100.0;
+	kappa = 10.0;
 
 	// compute diffusion value of particle B, compute box speeds for particles A and B
 	D_Brown_B 			= D_Brown_A;

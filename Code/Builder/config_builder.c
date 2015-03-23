@@ -5,7 +5,7 @@
 // define variables which will probably not be altered, except for hardcode
 #define 	D_rat		1.7
 #define 	dt 			1e-6
-#define 	writestep	1000
+#define 	writestep	100000
 
 // function declaration and static variables
 int builder();
@@ -32,7 +32,7 @@ static int iter;
 /*	This function reads from a provided builder file and builds the according files, template as follows:
 *
 *	iter 			1000000
-*	D_rat			0.1 		1.0 		0.1
+*	m				0.1 		1.0 		0.1
 *	Gamma 			10 			100 		10
 *	shear 			0			1000 		20
 *
