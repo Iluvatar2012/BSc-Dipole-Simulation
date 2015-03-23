@@ -113,21 +113,18 @@ int init(struct sim_struct *param, double* init_positions) {
 	// Initiate random number generator (0,1), use system time as seed
     time_t t;
     time(&t);
-    srand((unsigned int)t);
+	srand((unsigned int)t);
 
 	// compute Boxlength, narrow a as side of a box so that: a = sqrt(L²/N_A) = 1
 	L 	= sqrt(N/2.);	// N_A = N/2.;
 	Li 	= 1.0/L;
 
 	// set the interaction potential for the walls
-	kappa = 10.0;
+	kappa = 100.0;
 
 	// compute diffusion value of particle B, compute box speeds for particles A and B
-	// D_Brown_B 			= D_rat*D_Brown_A;
 	D_Brown_B 			= D_Brown_A;
-	// v_A					= v_s/D_Brown_A*kT;
 	v_A					= v_s/D_Brown_A*kT - v_s/(D_rat*D_Brown_B)*kT;
-	// v_B					= v_s/D_Brown_B*kT;
 	v_B					= 0;
 
 	// set values of remaining static variables
@@ -144,8 +141,7 @@ int init(struct sim_struct *param, double* init_positions) {
 	force_cutoff	= 3*Gamma_A/(cutoff_squared*cutoff_squared);
 
 	// compute the size of the Verlet list, add 10% as safety margin
-	N_Verlet = N;//*PI*cutoff_squared/(L*L);
-	//N_Verlet *= 1.1;
+	N_Verlet = N;
 
 	// check whether an old configuration of data can be used or whether new memory has to be allocated
 	if (init_positions != NULL) {
@@ -261,7 +257,7 @@ static void *iteration (int *no) {
 
 	// cutoff for the walls force, this will lead to a smoother transition
 	double dist_cutoff 			= 3.0;
-	double prefactor			= pow(Gamma_A, 4.0)/kappa;
+	double prefactor			= pow(Gamma_A, 1.0)/kappa;
 	double force_wall_cutoff 	= 1.0*prefactor *(kappa/dist_cutoff + 1.0/(dist_cutoff*dist_cutoff))*exp(-kappa*dist_cutoff);
 
 	if (min%2 == 0){
@@ -276,8 +272,6 @@ static void *iteration (int *no) {
 		D_kT_one = D_Brown_A/kT;
 		D_kT_two = D_Brown_B/kT;
 
-		// shear_one = v_s / (D_kT_one * L) * delta_t;
-		// shear_two = v_s / (D_kT_two * L) * delta_t;
 		shear_one = v_A / (L) * delta_t;
 		shear_two = v_B / (L) * delta_t;
 	}
@@ -293,8 +287,6 @@ static void *iteration (int *no) {
 		D_kT_one = D_Brown_B/kT;
 		D_kT_two = D_Brown_A/kT;
 
-		// shear_one = v_s / (D_kT_one * L) * delta_t;
-		// shear_two = v_s / (D_kT_two * L) * delta_t;
 		shear_one = v_B / (L) * delta_t;
 		shear_two = v_A / (L) * delta_t;
 	}
@@ -337,7 +329,6 @@ static void *iteration (int *no) {
 			if (yi >= L) {
 				fprintf(stderr, "%d: \t%lf\t%lf\t%lf\t%lf\n", i, yi, dist_top, force[2*i+1], L);
 			}
-
 
 			// get the amount of particles we have to iterate
 			iterate = verlet[N_Verlet*(i+1)-1];
@@ -404,7 +395,6 @@ static void *iteration (int *no) {
 			if (yi >= L) {
 				fprintf(stderr, "%d: \t%lf\t%lf\t%lf\t%lf\n", i, yi, dist_top, force[2*i+1], L);
 			}
-
 			// get the amount of particles we have to iterate
 			iterate = verlet[N_Verlet*(i+1)-1];
 
