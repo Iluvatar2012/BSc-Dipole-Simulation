@@ -48,7 +48,7 @@ int main(int argcount, char** argvector) {
 	counter = 0;
 
 	// iterate over all 50 steps, compute filenames and make pictures
-	for (int i=0; i<=steps; i+=50) {
+	for (int i=0; i<=steps; i+=100) {
 		// compute percentage of completed iterations
 		perc = 100.*i/steps;
 
