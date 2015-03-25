@@ -257,7 +257,7 @@ static void *iteration (int *no) {
 
 	// cutoff for the walls force, this will lead to a smoother transition
 	double dist_cutoff 			= 3.0;
-	double prefactor			= pow(Gamma_A, 1.0)/kappa;
+	double prefactor			= 30.0/kappa;
 	double force_wall_cutoff 	= 1.0*prefactor *(kappa/dist_cutoff + 1.0/(dist_cutoff*dist_cutoff))*exp(-kappa*dist_cutoff);
 
 	if (min%2 == 0){
