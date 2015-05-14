@@ -6,27 +6,47 @@
 
 #include "structs.h"
 
-/*----------------------------------------------------------------------------------------------------------------------------*/
-int draw_picture(int step, char* file, struct parameters* param) {
 
-	// basic variables
-	double 	posY, L;
-	int 	scrWidth, scrHeight;
+
+// basic variables
+static double 	L;
+static int 		N;
+
+static double* 	positions;
+static double* 	psi4;
+static double* 	psi6;
+
+static int 		scrWidth;
+static int 		scrHeight;
+
+// SDL variables 
+static SDL_Surface 	*screen;
+static SDL_Surface 	*ball_A;
+static SDL_Surface 	*ball_B;
+static SDL_Surface 	*psi_4_A;
+static SDL_Surface 	*psi_4_B;
+static SDL_Surface 	*psi_6_A;
+static SDL_Surface 	*psi_6_B;
+
+static SDL_Rect 	dst_even;
+static SDL_Rect 	dst_uneven;
+
+static SDL_Event	event;
+
+
+
+/*----------------------------------------------------------------------------------------------------------------------------*/
+int initiate (struct parameters* param) {
 
 	// get all necessary information from the struct
-	int 	N 			= param->N;
+	N 			= param->N;
 
-	double* positions 	= param->positions;
-	double* psi4 		= param->psi4;
-	double* psi6 		= param->psi6;
+	positions 	= param->positions;
+	psi4 		= param->psi4;
+	psi6 		= param->psi6;
 
 	// compute boxlength
 	L = sqrt(N/2.);
-
-	// create everything we need to show the simulation
-	SDL_Surface	*screen, *ball_A, *ball_B, *psi_4_A, *psi_4_B, *psi_6_A, *psi_6_B;
-	SDL_Rect	dst_even, dst_uneven;
-	SDL_Event	event;
 
 	// initiate the SDL video mode, terminate if there was an error
 	if ((SDL_Init(SDL_INIT_VIDEO)) == -1) {
@@ -39,7 +59,6 @@ int draw_picture(int step, char* file, struct parameters* param) {
 
 	// set up the screen, this will be our frame, terminate if there was an error
 	screen = SDL_SetVideoMode(1200, 1200, 16, SDL_HWSURFACE | SDL_DOUBLEBUF);
-	SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 255, 255, 255));
 	if (screen == NULL) {
 		fprintf(stderr, "Could not set video mode: %s\n", SDL_GetError());
 		return EXIT_FAILURE;
@@ -93,6 +112,37 @@ int draw_picture(int step, char* file, struct parameters* param) {
 	scrWidth 	= screen->w;
 	scrHeight 	= screen->h;
 
+	// return to caller
+	return EXIT_SUCCESS;
+}
+
+
+
+/*----------------------------------------------------------------------------------------------------------------------------*/
+void destroy () {
+
+	// clear memory of everything cluttering it
+	SDL_FreeSurface(screen);
+	SDL_FreeSurface(ball_A);
+	SDL_FreeSurface(ball_B);
+	SDL_FreeSurface(psi_4_A);
+	SDL_FreeSurface(psi_4_B);
+	SDL_FreeSurface(psi_6_A);
+	SDL_FreeSurface(psi_6_B);
+}
+
+
+
+/*----------------------------------------------------------------------------------------------------------------------------*/
+void draw_picture(int step, char* file) {
+
+	// basic variables
+	double 	posY;
+
+	// fill with a blank screen
+	SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 255, 255, 255));
+
+
 	// finally draw the current frame
 	for (int i=0; i<N; i++) {
 		// invert the y axis, otherwise (0,0) would be in the top left corner
@@ -125,15 +175,4 @@ int draw_picture(int step, char* file, struct parameters* param) {
 
 	// Save the screen to file
 	SDL_SaveBMP(screen, file);
-
-	// clear memory of everything cluttering it
-	SDL_FreeSurface(ball_A);
-	SDL_FreeSurface(ball_B);
-	SDL_FreeSurface(psi_4_A);
-	SDL_FreeSurface(psi_4_B);
-	SDL_FreeSurface(psi_6_A);
-	SDL_FreeSurface(psi_6_B);
-
-	// return to caller
-	return EXIT_SUCCESS;
 }

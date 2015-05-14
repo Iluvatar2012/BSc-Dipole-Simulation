@@ -41,6 +41,10 @@ int main(int argcount, char** argvector) {
 	// copy the number of steps we have
 	steps = param->steps;
 
+	// initiate the SDL libraries, check if successful
+	if (initiate(param) != EXIT_SUCCESS) 
+		return EXIT_FAILURE;
+
 	// user output
 	fprintf(stderr, "Computing...\n");
 
@@ -48,7 +52,7 @@ int main(int argcount, char** argvector) {
 	counter = 0;
 
 	// iterate over all 50 steps, compute filenames and make pictures
-	for (int i=0; i<=steps; i+=100) {
+	for (int i=0; i<=steps; i+=3) {
 		// compute percentage of completed iterations
 		perc = 100.*i/steps;
 
@@ -79,8 +83,7 @@ int main(int argcount, char** argvector) {
 		hdf5_read(i);
 
 		// build the picture
-		if (draw_picture(i, outfile, param) != EXIT_SUCCESS)
-			return EXIT_FAILURE;
+		draw_picture(i, outfile);
 
 		// increase counter
 		counter++;
@@ -88,6 +91,9 @@ int main(int argcount, char** argvector) {
 
 	// user output
 	fprintf(stderr, "\nDone!\n\n");
+
+	// free memory used by SDL
+	destroy();
 
 	// free struct, return to caller
 	free(param->positions);

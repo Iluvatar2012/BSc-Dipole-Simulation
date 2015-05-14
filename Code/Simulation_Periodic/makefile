@@ -1,5 +1,5 @@
 # name the resulting program
-NAME    := ../../Work/simulation_with_walls
+NAME    := ../../Work/simulation_periodic
 
 # include the necessary libraries and determine basic parameters
 LIBS    := -lm -lpthread -lhdf5

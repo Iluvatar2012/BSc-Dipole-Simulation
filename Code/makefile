@@ -6,14 +6,14 @@ export
 
 # call make in subdirectory BSC Dipole Simulation and BSC Graphic Output
 all:
-	$(MAKE) -C Simulation/ all
+	$(MAKE) -C Simulation_Periodic/ all
 
 	@echo ' '
 	@echo ' '
 	@echo ' '
 	@echo ' '
 	@echo ' '
-	$(MAKE) -C Simulation_Hard_Walls/ all
+	$(MAKE) -C Simulation_Walls/ all
 
 	@echo ' '
 	@echo ' '
