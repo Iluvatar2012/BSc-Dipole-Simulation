@@ -1,0 +1,775 @@
+#!/usr/bin/env ruby
+
+
+# define number and particle ratio variables, N > 0, 0.0 < X < 1.0
+N = 300
+X = 0.5
+
+# define system parameters
+thread_number 	= 16
+L_y 			= 2
+
+
+# calculate the number of A particles, X=0, means no, X=1 means exlusively A particles
+N_A = (N*X).round
+
+# calculate the amount of particles to iterate per thread
+N_thread = 1.0*N/thread_number
+
+# delete the previous version of the simulation source code, if it exists
+if File.exist?('simulation.c') then
+	File.delete('simulation.c');
+end
+
+
+
+# open a new file and start writing C code into it
+sim = File.open("simulation.c", 'w');
+
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+# write the first lines into the file
+sim.puts <<EOF
+#define _GNU_SOURCE
+
+// define constants of the simulation
+EOF
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+
+# define different system parameters
+sim.puts("#define		N 					" + N.to_s)
+sim.puts("#define		thread_number		" + thread_number.to_s)
+sim.puts("#define 	L_y					" + L_y.to_s)
+
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+sim.puts <<EOF
+
+#define 	kT					1.0
+#define		tau_B				1.0
+#define		D_Brown_A			1.0
+
+// standard header files
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <math.h>
+#include <pthread.h>
+
+#include <unistd.h>
+
+// own header files
+#include "structs.h"
+#include "simulation.h"
+#include "read_config.h"
+#include "extendedmath.h"
+#include "hdf5_output.h"
+
+
+
+/*-------------------------------------------------------------------------------------------------------*/
+// Basic values of Simulation
+static double cutoff;
+static double cutoff_squared;
+
+static int 	  tau;
+static double delta_t;
+static double timestep;
+static int	  max_timesteps;
+
+static int 	  write_step;
+static int 	  sim_number;
+
+// Particle properties
+static double Gamma_A;
+static double m;
+static double X_A;
+
+// Arrays for mechanical movement
+static double* force;
+static double* position;
+static double* displacement;
+
+// System properties
+static double L_x;
+static double gamma_shear;
+static double kappa;
+static double v_A;
+static double v_B;
+
+static double D_Brown_B;
+static double D_rat;
+static double weigh_brown_A;
+static double weigh_brown_B;
+
+// Variables required for Verlet list creation
+static int*    verlet;
+static double* verlet_max;
+static double* verlet_distance;
+static double  verlet_max_1;
+static double  verlet_max_2;
+static double  d_cutoff_verlet;
+static double  force_cutoff;
+
+// Other miscellaneous system variables, especially for thread handling
+static char 	outfile[1024];
+static int* 	numbers;
+static short 	cont;
+
+static pthread_t* 			threads;
+static pthread_barrier_t 	barrier_main_one;
+static pthread_barrier_t 	barrier_main_two;
+static pthread_barrier_t 	barrier_internal;
+
+
+
+/*-------------------------------------------------------------------------------------------------------*/
+void update_verlet (void) {
+	// define necessary variables: i, j and temporary position variables,
+	double xi, yi, xj, yj;
+	double dx, dy;
+	double r_squared;
+
+	// count how many values there are in the list
+	int k;
+
+	// iterate over all particles, read positions
+	for (int i=0; i<N; i++) {
+		xi = position[2*i];
+		yi = position[2*i+1];
+
+		// save the amount of neighbors to particle i in k
+		k = 0;
+
+		for (int j=0; j<N; j++) {
+
+			// ignore entry where particle i itself is inspected
+			if (i == j)
+				continue;
+
+			// get the position of particle j
+			xj = position[2*j];
+			yj = position[2*j+1];
+
+			// get the distance between both particles
+			dx = xi - xj;
+			dy = yi - yj;
+
+ 			// find images through altering dx
+			dx -= dround(dx/L_x)*L_x;
+
+			// find out squared distance and check against the verlet cutoff
+			r_squared = dx*dx + dy*dy;
+
+			// squaring is a strict monotonous function, thus we can check with the squares of the values (saves N*N sqrt()-calls)
+			if(cutoff_squared >= r_squared) {
+
+				// add neighbor and signums into verlet and sign list
+				verlet[N*i+k] 	= j;
+				k++;
+			}
+		}
+
+		// edit last entry of row, here we store how many neighbors particle i has, and reset distance counting vector
+		verlet[N*(i+1)-1] 		= k;
+		verlet_distance[2*i]	= 0;
+		verlet_distance[2*i+1] 	= 0;
+	}
+
+	// reset thread specific verlet counter
+	for (int i=0; i<thread_number; i++) {
+		verlet_max[2*i] 	= 0;
+		verlet_max[2*i+1]	= 0;
+	}
+}
+
+
+
+/*-------------------------------------------------------------------------------------------------------*/
+int init(struct parameters *param, double* init_positions) {
+
+	// copy values from incoming struct
+	Gamma_A			= param->Gamma_A;
+	m 				= param->m;
+	X_A				= param->X_A;
+
+	gamma_shear 	= param->gamma_shear;
+	D_rat			= param->D_rat;
+
+	timestep 		= param->timestep;
+	tau				= param->tau;
+	write_step		= param->write_step;
+	sim_number		= param->sim_number;
+
+	// check whether particle species orientation is correct
+	if (D_rat < 1) {
+		fprintf(stderr, "Value D_rat is smaller than 1.0, consider switching particle species properties. D_rat: %lf1.3\\n", D_rat);
+		return EXIT_FAILURE;
+	}
+
+	// check whether particle species ratio is correct
+	if (X_A < 0 || X_A > 1) {
+		fprintf(stderr, "Value X must be between 0 and 1 including, check configuration file and rerun. X: %lf\\n", X_A);
+		return EXIT_FAILURE;
+	}
+
+	// copy filename to write to
+	strncpy(outfile, param->outfile, 1024);
+
+	// release valuable memory space
+	free(param);
+
+	// Initiate random number generator (0,1), use system time as seed
+    time_t t;
+    time(&t);
+	srand((unsigned int)t);
+
+	// compute Boxlength, narrow a as side of a box so that: a = sqrt(Lx*Ly/N) = 1
+	L_x 	= N/L_y;
+
+	// set the interaction potential for the walls
+	kappa = 10.0;
+
+	// compute diffusion value of particle B, compute box speeds for particles A and B
+	D_Brown_B 			= D_Brown_A;
+	v_A					= gamma_shear/D_Brown_A*kT - gamma_shear/(D_rat*D_Brown_B)*kT;
+
+	// set values of remaining static variables
+	delta_t				= tau_B * timestep;
+	max_timesteps		= (int)(tau/timestep);
+
+	weigh_brown_A 		= sqrt(2.0 * D_Brown_A * delta_t);
+	weigh_brown_B 		= sqrt(2.0 * D_Brown_B * delta_t);
+
+	cutoff 				= (fmax(L_x, L_y)/2.0);
+	cutoff_squared 		= cutoff*cutoff;
+	d_cutoff_verlet 	= 0.16 * cutoff;	// equals 2.9/2.5-1, estimate for best runtime
+
+	// compute the force at cutoff value, this force will be deducted from the system
+	force_cutoff	= 3*Gamma_A/(cutoff_squared*cutoff_squared);
+
+	// check whether an old configuration of data can be used or whether new memory has to be allocated
+	if (init_positions != NULL) {
+		position = 		init_positions;
+	} else {
+		position = 		malloc(2*N*sizeof(double));
+	}
+
+	// allocate memory for fundamentally important arrays
+	force = 			malloc(2*N*sizeof(double));
+	displacement = 		malloc(2*N*sizeof(double));
+	verlet = 			malloc(N*N*sizeof(int));
+	verlet_distance = 	malloc(2*N*sizeof(double));
+	threads = 			malloc(thread_number*sizeof(pthread_t));
+	numbers = 			malloc(thread_number*sizeof(int));
+	verlet_max = 		malloc(2*thread_number*sizeof(double));
+
+	// check if successful
+	if((position == NULL) || (displacement == NULL) || (force == NULL) || (verlet == NULL) || (verlet_distance == NULL) || (threads == NULL) || (numbers == NULL) || (verlet_max == NULL)) {
+		fprintf(stderr, "Memory space for fundamentally important arrays could not be allocated.\\n");
+		return EXIT_FAILURE;
+	}
+
+	// initiate all displacement values to 0
+	for (int i=0; i<N; i++) {
+		displacement[2*i]	= 0;
+		displacement[2*i+1] = 0;
+	}
+
+	// check whether we still need to set the position values, initiate Verlet list
+	if (init_positions != NULL) {
+		update_verlet();
+		return EXIT_SUCCESS;
+	}
+
+	// compute initial particle positions, the particles shall be placed randomly with minimum distance criteria
+	short done;
+	double dx;
+	double dy;
+	double minDist = 0.2;
+
+	// iterate over all particles
+	for (int i=0; i<(2*N); i+=2) {
+
+		// repeat until all particles meet the minimum distance criterium
+		do {
+			//reset checking variable (1 = TRUE, 0 = FALSE)
+			done = 1;
+
+			// try using random positions for all particles
+			position[i]		= (rand()/(double)RAND_MAX)*L_x;
+			position[i+1]	= (rand()/(double)RAND_MAX)*L_y;
+
+			// check all particles already placed
+			for (int j=0; j<i; j+=2) {
+				// compute distance of the two particles
+				dx = position[j] 	- position[i];
+				dy = position[j+1] 	- position[i+1];
+
+				// check whether the minimum distance of particles is met, break loop if not
+				if (dx*dx+dy*dy < minDist*minDist || position[i+1] < minDist || position[i+1] > L_y-minDist) {
+					done = 0;
+					break;
+				}
+			}
+		} while (done == 0);
+	}
+
+	// initiate Verlet list
+	update_verlet();
+
+	return EXIT_SUCCESS;
+}
+
+
+
+/*-------------------------------------------------------------------------------------------------------*/
+EOF
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+
+# particle counter
+part_counter = 0
+
+# iterate over the total amount of threads
+for t in 0..(thread_number-1)
+	
+	sim.puts("static void *iteration_" + t.to_s + " (int *no) {")
+
+	# write the prelude of every function into file
+	sim.puts <<EOF
+		// Define necessary variables
+		double xi, xj, yi, yj;
+		double dx, dy;
+		double r_squared;
+
+		double temp_force;
+		double temp;
+
+		double u1, u2, g1, g2;
+
+		int iterate;
+		int j;
+
+		double m_i_A = 1.0;
+		double m_i_B = m;
+
+		double D_kT_A = D_Brown_A/kT;
+		double D_kT_B = D_Brown_B/kT;
+
+		double shear_A = v_A * delta_t;
+
+		double m_j;
+
+		double dist_bottom;
+		double dist_top;
+
+		// cutoff for the walls force, this will lead to a smoother transition
+		double dist_cutoff 			= 1.0;
+		double prefactor			= 30.0/kappa;
+		double force_wall_cutoff 	= 1.0*prefactor *(kappa/dist_cutoff + 1.0/(dist_cutoff*dist_cutoff))*exp(-kappa*dist_cutoff);
+
+		while(cont == 1) {
+EOF
+
+	# calculate lower and upper limit of one thread's particle numbers
+	part_no_low = 1.0*t*N_thread
+	part_no_hig = 1.0*(t+1)*N_thread
+
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+
+	# iterate over all particles
+	for i in part_no_low.round() .. (part_no_hig.round()-1)
+		
+		# check if this is an A or B particle
+		if i < N_A then
+			
+				sim.puts("			xi = position[2*"+i.to_s+"];")
+				sim.puts("			yi = position[2*"+i.to_s+"+1];\n\n")
+
+				sim.puts("			force[2*"+i.to_s+"]	 = 0;")
+				sim.puts("			force[2*"+i.to_s+"+1] = 0;\n\n")
+
+				sim.puts("			if (yi <= 1e-12) {")
+					sim.puts("				dist_bottom = 1e-12;")
+					sim.puts("				force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
+				sim.puts("			}")
+				sim.puts("			else if (yi <= dist_cutoff) {")
+					sim.puts("				dist_bottom = yi;")
+					sim.puts("				force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
+				sim.puts("			}\n\n")
+
+				sim.puts("			if (L_y - yi <= 1e-12) {")
+					sim.puts("				dist_bottom = 1e-12;")
+					sim.puts("				force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
+				sim.puts("			}")
+				sim.puts("			else if (L_y - yi <= dist_cutoff) {")
+					sim.puts("				dist_bottom = yi;")
+					sim.puts("				force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
+				sim.puts("			}\n\n")
+
+				sim.puts("			iterate = verlet[N*("+i.to_s+"+1)-1];\n\n")
+
+			sim.puts <<EOF	
+			for (int k=0; k<iterate; k+=1) {\n
+EOF
+			sim.puts("				j  = verlet[N*"+i.to_s+"+k];")
+			sim.puts <<EOF
+				xj = position[2*j];
+				yj = position[2*j+1];
+
+				m_j = (j%2)*m + (j+1)%2;
+
+				dx = xi - xj;
+				dy = yi - yj;
+
+				dx 		-= dround(dx/L_x)*L_x;
+
+				r_squared = dx*dx + dy*dy;
+				temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+
+EOF
+			sim.puts("				force[2*"+i.to_s+"] 		+= temp_force*dx;")
+			sim.puts("				force[2*"+i.to_s+"+1]	+= temp_force*dy;")
+			sim.puts("			}\n\n")
+		else
+
+				sim.puts("			xi = position[2*"+i.to_s+"];")
+				sim.puts("			yi = position[2*"+i.to_s+"+1];\n\n")
+
+				sim.puts("			force[2*"+i.to_s+"]	 = 0;")
+				sim.puts("			force[2*"+i.to_s+"+1] = 0;\n\n")
+
+				sim.puts("			if (yi <= 1e-12) {")
+					sim.puts("				dist_bottom = 1e-12;")
+					sim.puts("				force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
+				sim.puts("			}")
+				sim.puts("			else if (yi <= dist_cutoff) {")
+					sim.puts("				dist_bottom = yi;")
+					sim.puts("				force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
+				sim.puts("			}\n\n")
+
+				sim.puts("			if (L_y - yi <= 1e-12) {")
+					sim.puts("				dist_bottom = 1e-12;")
+					sim.puts("				force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
+				sim.puts("			}")
+				sim.puts("			else if (L_y - yi <= dist_cutoff) {")
+					sim.puts("				dist_bottom = yi;")
+					sim.puts("				force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
+				sim.puts("			}\n\n")
+
+				sim.puts("			iterate = verlet[N*("+i.to_s+"+1)-1];\n\n")
+
+			sim.puts <<EOF	
+			for (int k=0; k<iterate; k+=1) {\n
+EOF
+			sim.puts("				j  = verlet[N*"+i.to_s+"+k];")
+			sim.puts <<EOF
+				xj = position[2*j];
+				yj = position[2*j+1];
+
+				m_j = (j%2)*m + (j+1)%2;
+
+				dx = xi - xj;
+				dy = yi - yj;
+
+				dx 		-= dround(dx/L_x)*L_x;
+
+				r_squared = dx*dx + dy*dy;
+				temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+
+EOF
+			sim.puts("				force[2*"+i.to_s+"] 		+= temp_force*dx;")
+			sim.puts("				force[2*"+i.to_s+"+1]	+= temp_force*dy;")
+			sim.puts("			}\n\n")
+		end
+	end
+
+	sim.puts("			pthread_barrier_wait(&barrier_internal);\n\n")
+
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+
+
+	# iterate over all particles
+	for i in part_no_low.round() .. (part_no_hig.round()-1)
+		
+		# check if this is an A or B particle
+		if i < N_A then
+			sim.puts("			xi = position[2*"+i.to_s+"];")
+			sim.puts("			yi = position[2*"+i.to_s+"+1];\n\n")
+
+			sim.puts <<EOF
+				do {
+					u1 = rand()/(double)RAND_MAX;
+				} while (u1 == 0.0);
+				do {
+					u2 = rand()/(double)RAND_MAX;
+				} while (u2 == 0.0);
+
+				temp = sqrt(-2*log(u1));
+				g1 = temp*cos(TWO_PI*u2);
+				g2 = temp*sin(TWO_PI*u2);
+
+EOF
+
+			sim.puts("			dx = D_kT_A*delta_t*force[2*"+i.to_s+"]   + weigh_brown_A * g1 + position[2*"+i.to_s+"+1]*shear_A;")
+			sim.puts("			dy = D_kT_A*delta_t*force[2*"+i.to_s+"+1] + weigh_brown_A * g2;\n\n")
+
+			sim.puts("			position[2*"+i.to_s+"]		+= dx;")
+			sim.puts("			position[2*"+i.to_s+"+1] 	+= dy;\n\n")
+
+			sim.puts("			displacement[2*"+i.to_s+"]	+= dx;")
+			sim.puts("			displacement[2*"+i.to_s+"+1] += dy;\n\n")
+
+			sim.puts("			verlet_distance[2*"+i.to_s+"] 	+= (xi - position[2*"+i.to_s+"]);")
+			sim.puts("			verlet_distance[2*"+i.to_s+"+1] 	+= (yi - position[2*"+i.to_s+"+1]);\n\n")
+
+			sim.puts("			if ((temp = sqrt(verlet_distance[2*"+i.to_s+"]*verlet_distance[2*"+i.to_s+"] + verlet_distance[2*"+i.to_s+"+1]*verlet_distance[2*"+i.to_s+"+1])) > verlet_max[2*(*no)]) {")
+			sim.puts <<EOF
+				verlet_max[2*(*no)+1] = verlet_max[2*(*no)];
+				verlet_max[2*(*no)] = temp;
+			} else if (temp > verlet_max[2*(*no)+1]) {
+				verlet_max[2*(*no)+1] = temp;
+			}
+
+EOF
+			sim.puts("			position[2*"+i.to_s+"] 	-= floor(position[2*"+i.to_s+"]/L_x)*L_x;\n\n")
+		else
+			sim.puts("			xi = position[2*"+i.to_s+"];")
+			sim.puts("			yi = position[2*"+i.to_s+"+1];\n\n")
+
+			sim.puts <<EOF
+				do {
+					u1 = rand()/(double)RAND_MAX;
+				} while (u1 == 0.0);
+				do {
+					u2 = rand()/(double)RAND_MAX;
+				} while (u2 == 0.0);
+
+				temp = sqrt(-2*log(u1));
+				g1 = temp*cos(TWO_PI*u2);
+				g2 = temp*sin(TWO_PI*u2);
+
+EOF
+			sim.puts("			dx = D_kT_B*delta_t*force[2*"+i.to_s+"]   + weigh_brown_B * g1;")
+			sim.puts("			dy = D_kT_B*delta_t*force[2*"+i.to_s+"+1] + weigh_brown_B * g2;\n\n")
+
+			sim.puts("			position[2*"+i.to_s+"]		+= dx;")
+			sim.puts("			position[2*"+i.to_s+"+1] 	+= dy;\n\n")
+
+			sim.puts("			displacement[2*"+i.to_s+"]	+= dx;")
+			sim.puts("			displacement[2*"+i.to_s+"+1] += dy;\n\n")
+
+			sim.puts("			verlet_distance[2*"+i.to_s+"] 	+= (xi - position[2*"+i.to_s+"]);")
+			sim.puts("			verlet_distance[2*"+i.to_s+"+1] 	+= (yi - position[2*"+i.to_s+"+1]);\n\n")
+
+			sim.puts("			if ((temp = sqrt(verlet_distance[2*"+i.to_s+"]*verlet_distance[2*"+i.to_s+"] + verlet_distance[2*"+i.to_s+"+1]*verlet_distance[2*"+i.to_s+"+1])) > verlet_max[2*(*no)]) {")
+			sim.puts <<EOF
+				verlet_max[2*(*no)+1] = verlet_max[2*(*no)];
+				verlet_max[2*(*no)] = temp;
+			} else if (temp > verlet_max[2*(*no)+1]) {
+				verlet_max[2*(*no)+1] = temp;
+			}
+
+EOF
+			sim.puts("			position[2*"+i.to_s+"] 	-= floor(position[2*"+i.to_s+"]/L_x)*L_x;\n\n")
+		end
+	end
+
+	sim.puts <<EOF
+		// Signal to main thread, that all threads have finished their iteration
+		pthread_barrier_wait(&barrier_main_one);
+
+		// thread is done with one iteration, it will now wait for a signal from the main thread to continue
+		pthread_barrier_wait(&barrier_main_two);
+	}
+
+	return NULL;
+}
+
+
+
+EOF
+end
+
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+# write the actual simulation function which will call all the threads
+sim.puts <<EOF
+/*-------------------------------------------------------------------------------------------------------*/
+void simulation (void) {
+
+	char 	job[1024] = "Jobs/";
+	char 	buf[32];
+
+	double 	temp;
+	double 	perc;
+
+	int 	timesteps;
+	int 	ret_thread;
+
+	time_t 	init_time;
+	time_t 	current_time;
+	time_t 	rem_time;
+
+	char*	time_string;
+
+	// struct for passing all arguments to the hdf5 file
+	struct attributes *attr = malloc(sizeof(struct attributes));
+
+	// create a file to which we will write user output
+	sprintf(buf, "%d", sim_number);
+	strncat(job, buf, 32);
+
+	FILE *file = fopen(job, "w+");
+	if (file == NULL) {
+		fprintf(stderr, "File \\"%s\\" could not be opened, program will terminate. \\n", job);
+		return;
+	}
+
+	// Initiate timestep-counter and continuation value
+	timesteps = 0;
+	cont = 1;
+
+	// fill the attribute struct with values
+	attr->Num 			= N;
+	attr->Gamma_A		= Gamma_A;
+	attr->m 			= m;
+	attr->X_A			= X_A;
+	attr->gamma_shear 	= gamma_shear;
+	attr->D_rat			= D_rat;
+	attr->L_x			= L_x;
+	attr->L_y_attr		= L_y;
+	attr->max_writeouts = max_timesteps/write_step;
+	attr->tau 			= tau;
+	attr->write_step	= write_step;
+	attr->timestep 		= timestep;
+
+
+	// initialize file and write first time setup of the system
+	if (create_file(outfile, attr) == EXIT_FAILURE) {
+		
+		// variable for storing the amount of data already written
+		int written;
+		if (reopen_file(position, displacement, max_timesteps/write_step, &written) == EXIT_FAILURE)
+			exit(EXIT_FAILURE);
+
+		// iterate what timestep we are at
+		timesteps = write_step * written;
+		fprintf(file, "Timestep: %d\\n", timesteps);
+	}
+	else {
+		write_data(timesteps, position, displacement);
+	}
+
+	// increase timestep counter
+	timesteps ++;
+
+	// Initiate Threads and barrier, catch problems, number of threads is given in config-file
+	pthread_barrier_init(&barrier_main_one, NULL, thread_number+1);
+	pthread_barrier_init(&barrier_main_two, NULL, thread_number+1);
+	pthread_barrier_init(&barrier_internal, NULL, thread_number);
+
+EOF
+
+for t in 0..(thread_number-1)
+	sim.puts("	ret_thread 	= pthread_create(&(threads["+t.to_s+"]), NULL, (void*)&iteration_"+t.to_s+", &(numbers["+t.to_s+"]));\n\n")
+	sim.puts("	if (ret_thread != 0) {")
+	sim.puts("		fprintf(stderr, \"Thread %d could not be created. \\n\", "+t.to_s+");")
+	sim.puts("		exit(EXIT_FAILURE);")
+	sim.puts("	}")
+end
+
+sim.puts <<EOF
+
+	// save time at iteration start and output simulation start to user
+	time(&init_time);
+	time_string = ctime(&init_time);
+
+	fprintf(file, "Starting simulation ID: %d at %s"
+					"Parameters N: %d, m: %.2lf, Gamma: %.0lf, Shear: %.0lf, Steps: %d\\n\\n", sim_number, time_string, N, m, Gamma_A, gamma_shear, max_timesteps);
+	fflush(file);
+
+	// iterate over all timesteps
+	while (timesteps <= max_timesteps) {
+		// Synchronize all threads
+		pthread_barrier_wait(&barrier_main_one);
+
+		// Save maximum displacement of two particles, this determines when to update the Verlet-list
+		for (int i=0; i<2*thread_number; i++) {
+			if ((temp = verlet_max[i]) > verlet_max_1) {
+				verlet_max_2 = verlet_max_1;
+				verlet_max_1 = temp;
+			} else if (temp > verlet_max_2) {
+				verlet_max_2 = temp;
+			}
+		}
+
+		// check if verlet list has to be updated
+		if ((verlet_max_1+verlet_max_2) > d_cutoff_verlet) {
+			update_verlet();
+			verlet_max_1 = 0;
+			verlet_max_2 = 0;
+		}
+
+		// check whether parameters should be written to declared external file
+		if ((timesteps%write_step) == 0) {
+			write_data(timesteps, position, displacement);
+
+			// compute percentage of program already completed
+			perc = (100.*timesteps)/max_timesteps;
+
+			// compute elapsed program time
+			time(&current_time);
+			rem_time = current_time - init_time;
+
+			// give user a coherent overview
+			fprintf(file, "ID: %d, Progress: \\t\\t[", sim_number);
+
+			for(int i=0; i<floor(perc); i++) {
+				fprintf(file, "=");
+			}
+
+			if (perc != 100)
+				fprintf(file, ">");
+
+			for (int i=floor(perc)+1; i<100; i++) {
+				fprintf(file, ".");
+			}
+
+			fprintf(file, "] \\t%.1lf%%\\t\\telapsed time: %d s\\r", perc, (int)(rem_time));
+
+			fflush(file);
+		}
+
+		// increase timesteps and continue waiting threads
+		timesteps++;
+
+		pthread_barrier_wait(&barrier_main_two);
+	}
+
+	// terminate all threads, wait for every one to finish
+	for (int i=0; i<thread_number; i++) {
+		pthread_cancel(threads[i]);
+	}
+
+	sleep(1);
+
+	// end of simulation, free all allocated memory space
+	free(position);
+	free(force);
+	free(displacement);
+	free(verlet);
+	free(verlet_distance);
+	free(verlet_max);
+	free(threads);
+	free(numbers);
+
+	// compute runtime, give information to user and leave program
+	time(&current_time);
+	time_string = ctime(&current_time);
+
+	fprintf(file, "\\n\\nFinished simulation ID: %d at %s"
+					"Parameters N: %d, m: %.2lf, Gamma: %.0lf, Shear: %.0lf, Steps: %d\\n"
+					"Elapsed time: %d seconds\\n\\n", sim_number, time_string, N, m, Gamma_A, gamma_shear, max_timesteps, (int)(current_time - init_time));
+	fflush(file);
+	fclose(file);
+}
+EOF
