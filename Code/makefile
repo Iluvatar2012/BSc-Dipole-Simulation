@@ -20,6 +20,13 @@ all:
 	@echo ' '
 	@echo ' '
 	@echo ' '
+	$(MAKE) -C Simulation_Band/ all
+
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	@echo ' '
 	$(MAKE) -C Graphic/ all
 
 	@echo ' '
