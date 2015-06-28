@@ -22,8 +22,8 @@ int main(int argcount, char** argvector) {
 	double perc;
 
 	// check whether the right amount of arguments is given
-	if (argcount != 3) {
-		fprintf(stderr, "Please provide a filename to read from and how many steps to skip (one is none), process will terminate.\n");
+	if (argcount != 4) {
+		fprintf(stderr, "Please provide a filename to read from, how many steps to skip (one is none) and the initial images number, process will terminate.\n");
 		return EXIT_FAILURE;
 	}
 
@@ -95,6 +95,7 @@ int main(int argcount, char** argvector) {
 
 	// user output
 	fprintf(stderr, "\nDone!\n\n");
+	fprintf(stdout, "%d\n", counter);
 
 	// free memory used by SDL
 	destroy();
