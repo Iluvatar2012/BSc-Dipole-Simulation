@@ -1,13 +1,15 @@
-#!/usr/bin/env ruby
+#/usr/bin/ruby
+# #!/software/ruby/2.2.2/login/bin/ruby
 
+# get input from command line, convert to float and int respectively
+X 				= ARGV[0].to_f;
+thread_number 	= ARGV[1].to_i;
 
 # define number and particle ratio variables, N > 0, 0.0 < X < 1.0
 N = 300
-X = ARGV[0].to_f
 
-# define system parameters
-thread_number 	= 16
-L_y 			= 2
+# define system height
+L_y 		= 2
 
 # calculate the number of A particles, X=0, means no, X=1 means exlusively A particles
 N_A = (N*X).round
@@ -219,9 +221,9 @@ int init(struct parameters *param, double* init_positions) {
 	// set the interaction potential for the walls
 	kappa = 10.0;
 
-	// compute diffusion value of particle B, compute box speeds for particles A and B
-	D_Brown_B 			= D_Brown_A;
-	v_A					= gamma_shear/D_Brown_A*kT - gamma_shear/(D_rat*D_Brown_B)*kT;
+	// compute diffusion value of particle B, compute box speeds for particles A
+	D_Brown_B 			= D_Brown_A * D_rat;
+	v_A					= gamma_shear*D_Brown_A/kT;
 
 	// set values of remaining static variables
 	delta_t				= tau_B * timestep;
@@ -257,6 +259,11 @@ int init(struct parameters *param, double* init_positions) {
 	if((position == NULL) || (displacement == NULL) || (force == NULL) || (verlet == NULL) || (verlet_distance == NULL) || (threads == NULL) || (numbers == NULL) || (verlet_max == NULL)) {
 		fprintf(stderr, "Memory space for fundamentally important arrays could not be allocated.\\n");
 		return EXIT_FAILURE;
+	}
+
+	// initiate the numbers array
+	for (int i=0; i<thread_number; i++) {
+		numbers[i] = i;
 	}
 
 	// initiate all displacement values to 0
@@ -326,38 +333,38 @@ for t in 0..(thread_number-1)
 
 	# write the prelude of every function into file
 	sim.puts <<EOF
-		// Define necessary variables
-		double xi, xj, yi, yj;
-		double dx, dy;
-		double r_squared;
+	// Define necessary variables
+	double xi, xj, yi, yj;
+	double dx, dy;
+	double r_squared;
 
-		double temp_force;
-		double temp;
+	double temp_force;
+	double temp;
 
-		double u1, u2, g1, g2;
+	double u1, u2, g1, g2;
 
-		int iterate;
-		int j;
+	int iterate;
+	int j;
 
-		double m_i_A = 1.0;
-		double m_i_B = m;
+	double m_i_A = 1.0;
+	double m_i_B = m;
 
-		double D_kT_A = D_Brown_A/kT;
-		double D_kT_B = D_Brown_B/kT;
+	double D_kT_A = D_Brown_A/kT;
+	double D_kT_B = D_Brown_B/kT;
 
-		double shear_A = v_A * delta_t;
+	double shear_A = v_A * delta_t;
 
-		double m_j;
+	double m_j;
 
-		double dist_bottom;
-		double dist_top;
+	double dist_bottom;
+	double dist_top;
 
-		// cutoff for the walls force, this will lead to a smoother transition
-		double dist_cutoff 			= 1.0;
-		double prefactor			= 30.0/kappa;
-		double force_wall_cutoff 	= 1.0*prefactor *(kappa/dist_cutoff + 1.0/(dist_cutoff*dist_cutoff))*exp(-kappa*dist_cutoff);
+	// cutoff for the walls force, this will lead to a smoother transition
+	double dist_cutoff 			= 1.0;
+	double prefactor			= 3.0;
+	double force_wall_cutoff 	= 1.0*prefactor *(kappa/dist_cutoff + 1.0/(dist_cutoff*dist_cutoff))*exp(-kappa*dist_cutoff);
 
-		while(cont == 1) {
+	while(cont == 1) {
 EOF
 
 	# calculate lower and upper limit of one thread's particle numbers
@@ -398,44 +405,45 @@ EOF
 
 				sim.puts("			iterate = verlet[N*("+i.to_s+"+1)-1];\n\n")
 
+
 			sim.puts <<EOF	
 			for (int k=0; k<iterate; k+=1) {\n
 EOF
-			sim.puts("				j  = verlet[N*"+i.to_s+"+k];")
+			sim.puts("			j  = verlet[N*"+i.to_s+"+k];")
 			sim.puts <<EOF
-				xj = position[2*j];
-				yj = position[2*j+1];
+			xj = position[2*j];
+			yj = position[2*j+1];
 
-				m_j = (j%2)*m + (j+1)%2;
+			m_j = (j%2)*m + (j+1)%2;
 
-				dx = xi - xj;
-				dy = yi - yj;
+			dx = xi - xj;
+			dy = yi - yj;
 
-				dx 		-= dround(dx/L_x)*L_x;
+			dx 		-= dround(dx/L_x)*L_x;
 
-				r_squared = dx*dx + dy*dy;
-				temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			r_squared = dx*dx + dy*dy;
+			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
 
 EOF
-			sim.puts("				force[2*"+i.to_s+"] 		+= temp_force*dx;")
-			sim.puts("				force[2*"+i.to_s+"+1]	+= temp_force*dy;")
-			sim.puts("			}\n\n")
+			sim.puts("			force[2*"+i.to_s+"] 		+= temp_force*dx;")
+			sim.puts("			force[2*"+i.to_s+"+1]	+= temp_force*dy;")
+			sim.puts("		}\n\n")
 		else
 
-				sim.puts("			xi = position[2*"+i.to_s+"];")
-				sim.puts("			yi = position[2*"+i.to_s+"+1];\n\n")
+				sim.puts("		xi = position[2*"+i.to_s+"];")
+				sim.puts("		yi = position[2*"+i.to_s+"+1];\n\n")
 
-				sim.puts("			force[2*"+i.to_s+"]	 = 0;")
-				sim.puts("			force[2*"+i.to_s+"+1] = 0;\n\n")
+				sim.puts("		force[2*"+i.to_s+"]	 = 0;")
+				sim.puts("		force[2*"+i.to_s+"+1] = 0;\n\n")
 
-				sim.puts("			if (yi <= 1e-12) {")
-					sim.puts("				dist_bottom = 1e-12;")
-					sim.puts("				force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
-				sim.puts("			}")
-				sim.puts("			else if (yi <= dist_cutoff) {")
-					sim.puts("				dist_bottom = yi;")
-					sim.puts("				force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
-				sim.puts("			}\n\n")
+				sim.puts("		if (yi <= 1e-12) {")
+					sim.puts("			dist_bottom = 1e-12;")
+					sim.puts("			force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
+				sim.puts("		}")
+				sim.puts("		else if (yi <= dist_cutoff) {")
+					sim.puts("			dist_bottom = yi;")
+					sim.puts("			force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
+				sim.puts("		}\n\n")
 
 				sim.puts("			if (L_y - yi <= 1e-12) {")
 					sim.puts("				dist_top = 1e-12;")
@@ -446,34 +454,35 @@ EOF
 					sim.puts("				force[2*"+i.to_s+"+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;")
 				sim.puts("			}\n\n")
 
-				sim.puts("			iterate = verlet[N*("+i.to_s+"+1)-1];\n\n")
+
+				sim.puts("		iterate = verlet[N*("+i.to_s+"+1)-1];\n\n")
 
 			sim.puts <<EOF	
 			for (int k=0; k<iterate; k+=1) {\n
 EOF
-			sim.puts("				j  = verlet[N*"+i.to_s+"+k];")
+			sim.puts("			j  = verlet[N*"+i.to_s+"+k];")
 			sim.puts <<EOF
-				xj = position[2*j];
-				yj = position[2*j+1];
+			xj = position[2*j];
+			yj = position[2*j+1];
 
-				m_j = (j%2)*m + (j+1)%2;
+			m_j = (j%2)*m + (j+1)%2;
 
-				dx = xi - xj;
-				dy = yi - yj;
+			dx = xi - xj;
+			dy = yi - yj;
 
-				dx 		-= dround(dx/L_x)*L_x;
+			dx 		-= dround(dx/L_x)*L_x;
 
-				r_squared = dx*dx + dy*dy;
-				temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			r_squared = dx*dx + dy*dy;
+			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
 
 EOF
-			sim.puts("				force[2*"+i.to_s+"] 		+= temp_force*dx;")
-			sim.puts("				force[2*"+i.to_s+"+1]	+= temp_force*dy;")
-			sim.puts("			}\n\n")
+			sim.puts("			force[2*"+i.to_s+"] 		+= temp_force*dx;")
+			sim.puts("			force[2*"+i.to_s+"+1]	+= temp_force*dy;")
+			sim.puts("		}\n\n")
 		end
 	end
 
-	sim.puts("			pthread_barrier_wait(&barrier_internal);\n\n")
+	sim.puts("		pthread_barrier_wait(&barrier_internal);\n\n")
 
 #------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
 
@@ -483,84 +492,84 @@ EOF
 		
 		# check if this is an A or B particle
 		if i < N_A then
-			sim.puts("			xi = position[2*"+i.to_s+"];")
-			sim.puts("			yi = position[2*"+i.to_s+"+1];\n\n")
+			sim.puts("		xi = position[2*"+i.to_s+"];")
+			sim.puts("		yi = position[2*"+i.to_s+"+1];\n\n")
 
 			sim.puts <<EOF
-				do {
-					u1 = rand()/(double)RAND_MAX;
-				} while (u1 == 0.0);
-				do {
-					u2 = rand()/(double)RAND_MAX;
-				} while (u2 == 0.0);
+			do {
+				u1 = rand()/(double)RAND_MAX;
+			} while (u1 == 0.0);
+			do {
+				u2 = rand()/(double)RAND_MAX;
+			} while (u2 == 0.0);
 
-				temp = sqrt(-2*log(u1));
-				g1 = temp*cos(TWO_PI*u2);
-				g2 = temp*sin(TWO_PI*u2);
+			temp = sqrt(-2*log(u1));
+			g1 = temp*cos(TWO_PI*u2);
+			g2 = temp*sin(TWO_PI*u2);
 
 EOF
 
-			sim.puts("			dx = D_kT_A*delta_t*force[2*"+i.to_s+"]   + weigh_brown_A * g1 + position[2*"+i.to_s+"+1]*shear_A;")
-			sim.puts("			dy = D_kT_A*delta_t*force[2*"+i.to_s+"+1] + weigh_brown_A * g2;\n\n")
+			sim.puts("		dx = D_kT_A*delta_t*force[2*"+i.to_s+"]   + weigh_brown_A * g1 + (position[2*"+i.to_s+"+1] - 0.5*L_y)*shear_A;")
+			sim.puts("		dy = D_kT_A*delta_t*force[2*"+i.to_s+"+1] + weigh_brown_A * g2;\n\n")
 
-			sim.puts("			position[2*"+i.to_s+"]		+= dx;")
-			sim.puts("			position[2*"+i.to_s+"+1] 	+= dy;\n\n")
+			sim.puts("		position[2*"+i.to_s+"]		+= dx;")
+			sim.puts("		position[2*"+i.to_s+"+1] 	+= dy;\n\n")
 
-			sim.puts("			displacement[2*"+i.to_s+"]	+= dx;")
-			sim.puts("			displacement[2*"+i.to_s+"+1] += dy;\n\n")
+			sim.puts("		displacement[2*"+i.to_s+"]	+= dx;")
+			sim.puts("		displacement[2*"+i.to_s+"+1] += dy;\n\n")
 
-			sim.puts("			verlet_distance[2*"+i.to_s+"] 	+= (xi - position[2*"+i.to_s+"]);")
-			sim.puts("			verlet_distance[2*"+i.to_s+"+1] 	+= (yi - position[2*"+i.to_s+"+1]);\n\n")
+			sim.puts("		verlet_distance[2*"+i.to_s+"] 	+= (xi - position[2*"+i.to_s+"]);")
+			sim.puts("		verlet_distance[2*"+i.to_s+"+1] 	+= (yi - position[2*"+i.to_s+"+1]);\n\n")
 
-			sim.puts("			if ((temp = sqrt(verlet_distance[2*"+i.to_s+"]*verlet_distance[2*"+i.to_s+"] + verlet_distance[2*"+i.to_s+"+1]*verlet_distance[2*"+i.to_s+"+1])) > verlet_max[2*(*no)]) {")
+			sim.puts("		if ((temp = sqrt(verlet_distance[2*"+i.to_s+"]*verlet_distance[2*"+i.to_s+"] + verlet_distance[2*"+i.to_s+"+1]*verlet_distance[2*"+i.to_s+"+1])) > verlet_max[2*(*no)]) {")
 			sim.puts <<EOF
-				verlet_max[2*(*no)+1] = verlet_max[2*(*no)];
-				verlet_max[2*(*no)] = temp;
-			} else if (temp > verlet_max[2*(*no)+1]) {
-				verlet_max[2*(*no)+1] = temp;
-			}
+			verlet_max[2*(*no)+1] = verlet_max[2*(*no)];
+			verlet_max[2*(*no)] = temp;
+		} else if (temp > verlet_max[2*(*no)+1]) {
+			verlet_max[2*(*no)+1] = temp;
+		}
 
 EOF
-			sim.puts("			position[2*"+i.to_s+"] 	-= floor(position[2*"+i.to_s+"]/L_x)*L_x;\n\n")
+			sim.puts("		position[2*"+i.to_s+"] 	-= floor(position[2*"+i.to_s+"]/L_x)*L_x;\n\n")
 		else
-			sim.puts("			xi = position[2*"+i.to_s+"];")
-			sim.puts("			yi = position[2*"+i.to_s+"+1];\n\n")
+			sim.puts("		xi = position[2*"+i.to_s+"];")
+			sim.puts("		yi = position[2*"+i.to_s+"+1];\n\n")
 
 			sim.puts <<EOF
-				do {
-					u1 = rand()/(double)RAND_MAX;
-				} while (u1 == 0.0);
-				do {
-					u2 = rand()/(double)RAND_MAX;
-				} while (u2 == 0.0);
+			do {
+				u1 = rand()/(double)RAND_MAX;
+			} while (u1 == 0.0);
+			do {
+				u2 = rand()/(double)RAND_MAX;
+			} while (u2 == 0.0);
 
-				temp = sqrt(-2*log(u1));
-				g1 = temp*cos(TWO_PI*u2);
-				g2 = temp*sin(TWO_PI*u2);
+			temp = sqrt(-2*log(u1));
+			g1 = temp*cos(TWO_PI*u2);
+			g2 = temp*sin(TWO_PI*u2);
 
 EOF
-			sim.puts("			dx = D_kT_B*delta_t*force[2*"+i.to_s+"]   + weigh_brown_B * g1;")
-			sim.puts("			dy = D_kT_B*delta_t*force[2*"+i.to_s+"+1] + weigh_brown_B * g2;\n\n")
+			sim.puts("		dx = D_kT_B*delta_t*force[2*"+i.to_s+"]   + weigh_brown_B * g1;")
+			sim.puts("		dy = D_kT_B*delta_t*force[2*"+i.to_s+"+1] + weigh_brown_B * g2;\n\n")
 
-			sim.puts("			position[2*"+i.to_s+"]		+= dx;")
-			sim.puts("			position[2*"+i.to_s+"+1] 	+= dy;\n\n")
+			sim.puts("		position[2*"+i.to_s+"]		+= dx;")
+			sim.puts("		position[2*"+i.to_s+"+1] 	+= dy;\n\n")
 
-			sim.puts("			displacement[2*"+i.to_s+"]	+= dx;")
-			sim.puts("			displacement[2*"+i.to_s+"+1] += dy;\n\n")
+			sim.puts("		displacement[2*"+i.to_s+"]	+= dx;")
+			sim.puts("		displacement[2*"+i.to_s+"+1] += dy;\n\n")
 
-			sim.puts("			verlet_distance[2*"+i.to_s+"] 	+= (xi - position[2*"+i.to_s+"]);")
-			sim.puts("			verlet_distance[2*"+i.to_s+"+1] 	+= (yi - position[2*"+i.to_s+"+1]);\n\n")
+			sim.puts("		verlet_distance[2*"+i.to_s+"] 	+= (xi - position[2*"+i.to_s+"]);")
+			sim.puts("		verlet_distance[2*"+i.to_s+"+1] 	+= (yi - position[2*"+i.to_s+"+1]);\n\n")
 
-			sim.puts("			if ((temp = sqrt(verlet_distance[2*"+i.to_s+"]*verlet_distance[2*"+i.to_s+"] + verlet_distance[2*"+i.to_s+"+1]*verlet_distance[2*"+i.to_s+"+1])) > verlet_max[2*(*no)]) {")
+			sim.puts("		if ((temp = sqrt(verlet_distance[2*"+i.to_s+"]*verlet_distance[2*"+i.to_s+"] + verlet_distance[2*"+i.to_s+"+1]*verlet_distance[2*"+i.to_s+"+1])) > verlet_max[2*(*no)]) {")
 			sim.puts <<EOF
-				verlet_max[2*(*no)+1] = verlet_max[2*(*no)];
-				verlet_max[2*(*no)] = temp;
-			} else if (temp > verlet_max[2*(*no)+1]) {
-				verlet_max[2*(*no)+1] = temp;
-			}
+			verlet_max[2*(*no)+1] = verlet_max[2*(*no)];
+			verlet_max[2*(*no)] = temp;
+		} else if (temp > verlet_max[2*(*no)+1]) {
+			verlet_max[2*(*no)+1] = temp;
+		}
 
 EOF
-			sim.puts("			position[2*"+i.to_s+"] 	-= floor(position[2*"+i.to_s+"]/L_x)*L_x;\n\n")
+			sim.puts("		position[2*"+i.to_s+"] 	-= floor(position[2*"+i.to_s+"]/L_x)*L_x;\n\n")
 		end
 	end
 
@@ -768,3 +777,4 @@ sim.puts <<EOF
 	fclose(file);
 }
 EOF
+
