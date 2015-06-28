@@ -22,4 +22,13 @@ all:
 	@echo ' '
 	@echo ' '
 
+	$(MAKE) -C Movies/ all
+
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	@echo ' '
+
+
 	$(MAKE) -C Simulation_Band/ all

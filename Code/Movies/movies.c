@@ -17,6 +17,7 @@ int main(int argcount, char** argvector) {
 
 	int steps, counter;
 	int stepsize;
+	int init_image_num;
 
 	double perc;
 
@@ -26,9 +27,10 @@ int main(int argcount, char** argvector) {
 		return EXIT_FAILURE;
 	}
 
-	// copy the filename and stepsize
+	// copy the filename, stepsize and the first images number
 	strncpy(file, argvector[1], 1024);
-	steplength  = strtol(argvector[2], NULL, 10);
+	stepsize  		= strtol(argvector[2], NULL, 10);
+	init_image_num	= strtol(argvector[3], NULL, 10);
 
 	// user output
 	fprintf(stderr, "Reading file: %s\n", file);
@@ -51,10 +53,10 @@ int main(int argcount, char** argvector) {
 	fprintf(stderr, "Computing...\n");
 
 	// initiate counter
-	counter = 0;
+	counter = init_image_num;
 
 	// iterate over all steps, compute filenames and make pictures
-	for (int i=0; i<=steps; i++) {
+	for (int i=0; i<=steps; i+=stepsize) {
 		// compute percentage of completed iterations
 		perc = 100.*i/steps;
 
@@ -99,8 +101,6 @@ int main(int argcount, char** argvector) {
 
 	// free struct, return to caller
 	free(param->positions);
-	free(param->psi4);
-	free(param->psi6);
 	free(param);
 
 	return EXIT_SUCCESS;

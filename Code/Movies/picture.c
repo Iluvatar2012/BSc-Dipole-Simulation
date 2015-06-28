@@ -22,6 +22,7 @@ static int 		scrWidth;
 static int 		scrHeight;
 
 static int 		frac_A;
+static double 	frac_X;
 
 // SDL variables 
 static SDL_Surface 	*screen;
@@ -48,6 +49,7 @@ int initiate (struct parameters* param) {
 
 	// calculate total number of A particles
 	frac_A		= round(N*X);
+	frac_X		= L_x/5.0;
 
 	// initiate the SDL video mode, terminate if there was an error
 	if ((SDL_Init(SDL_INIT_VIDEO)) == -1) {
@@ -111,27 +113,49 @@ void draw_picture(int step, char* file) {
 
 	// basic variables
 	double 	posY;
+	double 	posX;
 
 	// fill with a blank screen
 	SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 255, 255, 255));
 
-
 	// finally draw the current frame
 	for (int i=0; i<N; i++) {
-		// invert the y axis, otherwise (0,0) would be in the top left corner
-		posY = -positions[2*i+1]+L;
+		// invert the y axis, otherwise (0,0) would be in the top left corner, copy x location
+		posY = L_y - positions[2*i+1];
+		posX = positions[2*i];
 
-		// copy image to screen according to whether we need a red or black dot
+		// check in which row the particle is, reiterate position of x and y
+		if (posX < frac_X) {
+			posY += 0.25*L_y;
+
+		} else if (posX < 2*frac_X) {
+			posX -= frac_X;
+			posY += 1.75*L_y;
+
+		} else if (posX < 3*frac_X) {
+			posX -= 2*frac_X;
+			posY += 3.25*L_y;
+
+		} else if (posX < 4*frac_X) {
+			posX -= 3*frac_X;
+			posY += 4.75*L_y;
+
+		} else {
+			posX -= 4*frac_X;
+			posY += 6.25*L_y;
+		}
+
+		// copy image to screen according to whether we need a A or B particle
 		if (i <= frac_A) {
 			// compute x and y position of each dot
-			dst_even.x = round((positions[2*i]/L) *scrWidth - ball_A->w/2.);
-			dst_even.y = round((posY/L)*scrHeight - ball_A->h/2.);
+			dst_even.x = round((posX/frac_X) *scrWidth - ball_A->w/2.);
+			dst_even.y = round((posY/(7.5*L_y))*scrHeight - ball_A->h/2.);
 			SDL_BlitSurface(ball_A, NULL, screen, &dst_even);
 		}
 		else {
 			// compute x and y position of each dot
-			dst_uneven.x = round((positions[2*i]/L) *scrWidth - ball_B->w/2.);
-			dst_uneven.y = round((posY/L)*scrHeight - ball_B->h/2.);
+			dst_uneven.x = round((posX/frac_X) *scrWidth - ball_B->w/2.);
+			dst_uneven.y = round((posY/(7.5*L_y))*scrHeight - ball_B->h/2.);
 			SDL_BlitSurface(ball_B, NULL, screen, &dst_uneven);
 		}
 	}

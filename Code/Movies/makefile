@@ -1,14 +1,14 @@
 # define output name
-NAME 	:= ../../Work/graphic
+NAME 	:= ../../Work/movies
 
 # define necessary libraries
 LIBS 	:= -lm -lhdf5 -lSDL
 
-all: graphic.o hdf5.o picture.o
+all: movies.o hdf5.o picture.o
 	@echo ' '
 	@echo '--------------------------------------------------------------------------------------------------------------------------------------'
 	@echo 'Invoking: GCC C Linker'
-	$(CC) graphic.o hdf5.o picture.o -o $(NAME) $(LIBS)
+	$(CC) movies.o hdf5.o picture.o -o $(NAME) $(LIBS)
 	@echo 'Finished building: '$(NAME)
 	@echo ' '
 
@@ -17,10 +17,10 @@ all: graphic.o hdf5.o picture.o
 	rm -rf *.o
 	@echo ' '
 
-graphic.o: graphic.c
+movies.o: movies.c
 	@echo '--------------------------------------------------------------------------------------------------------------------------------------'
 	@echo 'Invoking: GCC C Compiler'
-	$(CC) $(CFLAGS) -o graphic.o graphic.c
+	$(CC) $(CFLAGS) -o movies.o movies.c
 
 hdf5.o: hdf5.c
 	$(CC) $(CFLAGS) -o hdf5.o hdf5.c
