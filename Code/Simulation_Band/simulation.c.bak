@@ -1,51 +1,14 @@
-#!/usr/bin/ruby
-# #!/software/ruby/2.2.2/login/bin/ruby
-
-# get input from command line, convert to float and int respectively
-X 				= ARGV[0].to_f;
-thread_number 	= ARGV[1].to_i;
-
-# define number and particle ratio variables, N > 0, 0.0 < X < 1.0
-N = 300
-
-# define system height
-L_y 		= 2
-
-# calculate the number of A particles, X=0, means no, X=1 means exlusively A particles
-N_A = (N*X).round
-
-# calculate the amount of particles to iterate per thread
-N_thread = 1.0*N/thread_number
-
-# delete the previous version of the simulation source code, if it exists
-if File.exist?('simulation.c') then
-	File.delete('simulation.c');
-end
-
-# open a new file and start writing C code into it
-sim = File.open("simulation.c", 'w');
-
-#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
-# write the first lines into the file
-sim.puts <<EOF
 #define _GNU_SOURCE
 
 // define constants of the simulation
-EOF
-#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
-
-# define different system parameters
-sim.puts("#define		N 					" + N.to_s)
-sim.puts("#define		thread_number		" + thread_number.to_s)
-sim.puts("#define 	L_y					" + L_y.to_s)
-sim.puts("#define 	X_A					" + X.to_s)
-
-#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
-sim.puts <<EOF
+#define 	N 					300
+#define		thread_number		16
 
 #define 	kT					1.0
 #define		tau_B				1.0
 #define		D_Brown_A			1.0
+
+#define 	L_y					2
 
 // standard header files
 #include <stdio.h>
@@ -82,6 +45,7 @@ static int 	  sim_number;
 // Particle properties
 static double Gamma_A;
 static double m;
+static double X_A;
 
 // Arrays for mechanical movement
 static double* force;
@@ -90,7 +54,7 @@ static double* displacement;
 
 // System properties
 static double L_x;
-static double gamma_shear;
+static double gamma;
 static double kappa;
 static double v_A;
 static double v_B;
@@ -111,6 +75,7 @@ static double  force_cutoff;
 
 // Other miscellaneous system variables, especially for thread handling
 static char 	outfile[1024];
+static int* 	borders;
 static int* 	numbers;
 static short 	cont;
 
@@ -189,8 +154,9 @@ int init(struct parameters *param, double* init_positions) {
 	// copy values from incoming struct
 	Gamma_A			= param->Gamma_A;
 	m 				= param->m;
+	X_A				= param->X_A;
 
-	gamma_shear 	= param->gamma_shear;
+	gamma 			= param->gamma;
 	D_rat			= param->D_rat;
 
 	timestep 		= param->timestep;
@@ -200,7 +166,13 @@ int init(struct parameters *param, double* init_positions) {
 
 	// check whether particle species orientation is correct
 	if (D_rat < 1) {
-		fprintf(stderr, "Value D_rat is smaller than 1.0, consider switching particle species properties. D_rat: %lf1.3\\n", D_rat);
+		fprintf(stderr, "Value D_rat is smaller than 1.0, consider switching particle species properties. D_rat: %lf1.3\n", D_rat);
+		return EXIT_FAILURE;
+	}
+
+	// check whether particle species ratio is correct
+	if (X < 0 || X > 1) {
+		fprintf(stderr, "Value X must be between 0 and 1 including, check configuration file and rerun. X: %lf\n", X);
 		return EXIT_FAILURE;
 	}
 
@@ -221,9 +193,10 @@ int init(struct parameters *param, double* init_positions) {
 	// set the interaction potential for the walls
 	kappa = 10.0;
 
-	// compute diffusion value of particle B, compute box speeds for particles A
-	D_Brown_B 			= D_Brown_A * D_rat;
-	v_A					= gamma_shear*D_Brown_A/kT;
+	// compute diffusion value of particle B, compute box speeds for particles A and B
+	D_Brown_B 			= D_Brown_A;
+	v_A					= (gamma*L_y)/D_Brown_A*kT - (gamma*L_y)/(D_rat*D_Brown_B)*kT;
+	v_B					= 0;
 
 	// set values of remaining static variables
 	delta_t				= tau_B * timestep;
@@ -232,7 +205,7 @@ int init(struct parameters *param, double* init_positions) {
 	weigh_brown_A 		= sqrt(2.0 * D_Brown_A * delta_t);
 	weigh_brown_B 		= sqrt(2.0 * D_Brown_B * delta_t);
 
-	cutoff 				= (fmax(L_x, L_y)/2.0);
+	cutoff 				= (max(L_x, L_y)/2.0);
 	cutoff_squared 		= cutoff*cutoff;
 	d_cutoff_verlet 	= 0.16 * cutoff;	// equals 2.9/2.5-1, estimate for best runtime
 
@@ -252,18 +225,15 @@ int init(struct parameters *param, double* init_positions) {
 	verlet = 			malloc(N*N*sizeof(int));
 	verlet_distance = 	malloc(2*N*sizeof(double));
 	threads = 			malloc(thread_number*sizeof(pthread_t));
+	borders = 			malloc((thread_number+1)*sizeof(int));
 	numbers = 			malloc(thread_number*sizeof(int));
 	verlet_max = 		malloc(2*thread_number*sizeof(double));
 
 	// check if successful
-	if((position == NULL) || (displacement == NULL) || (force == NULL) || (verlet == NULL) || (verlet_distance == NULL) || (threads == NULL) || (numbers == NULL) || (verlet_max == NULL)) {
-		fprintf(stderr, "Memory space for fundamentally important arrays could not be allocated.\\n");
+	if((position == NULL) || (displacement == NULL) || (force == NULL) || (verlet == NULL) || (verlet_distance == NULL) || \
+		(threads == NULL) || (borders == NULL) || (numbers == NULL) || (verlet_max == NULL)) {
+		fprintf(stderr, "Memory space for fundamentally important arrays could not be allocated.\n");
 		return EXIT_FAILURE;
-	}
-
-	// initiate the numbers array
-	for (int i=0; i<thread_number; i++) {
-		numbers[i] = i;
 	}
 
 	// initiate all displacement values to 0
@@ -320,19 +290,7 @@ int init(struct parameters *param, double* init_positions) {
 
 
 /*-------------------------------------------------------------------------------------------------------*/
-EOF
-#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
-
-# particle counter
-part_counter = 0
-
-# iterate over the total amount of threads
-for t in 0..(thread_number-1)
-	
-	sim.puts("static void *iteration_" + t.to_s + " (int *no) {")
-
-	# write the prelude of every function into file
-	sim.puts <<EOF
+static void *iteration (int *no) {
 	// Define necessary variables
 	double xi, xj, yi, yj;
 	double dx, dy;
@@ -343,16 +301,23 @@ for t in 0..(thread_number-1)
 
 	double u1, u2, g1, g2;
 
+	int min = borders[*no];
+	int max = borders[*no+1];
+
 	int iterate;
 	int j;
 
-	double m_i_A = 1.0;
-	double m_i_B = m;
+	double m_i_one;
+	double m_i_two;
 
-	double D_kT_A = D_Brown_A/kT;
-	double D_kT_B = D_Brown_B/kT;
+	double weigh_brown_one;
+	double weigh_brown_two;
 
-	double shear_A = v_A * delta_t;
+	double D_kT_one;
+	double D_kT_two;
+
+	double shear_one;
+	double shear_two;
 
 	double m_j;
 
@@ -360,142 +325,177 @@ for t in 0..(thread_number-1)
 	double dist_top;
 
 	// cutoff for the walls force, this will lead to a smoother transition
-	double dist_cutoff 			= 1.0;
-	double prefactor			= 3.0;
+	double dist_cutoff 			= 3.0;
+	double prefactor			= 30.0/kappa;
 	double force_wall_cutoff 	= 1.0*prefactor *(kappa/dist_cutoff + 1.0/(dist_cutoff*dist_cutoff))*exp(-kappa*dist_cutoff);
 
+	if (min%2 == 0){
+		// get the relation of all even values, this is basically the interaction relation this particle will have with other particles
+		m_i_one = 1.0;
+		m_i_two = m;
+
+		// set the appropriate diffusion parameters according to index of particle
+		weigh_brown_one = weigh_brown_A;
+		weigh_brown_two = weigh_brown_B;
+
+		D_kT_one = D_Brown_A/kT;
+		D_kT_two = D_Brown_B/kT;
+
+		shear_one = v_A / (L) * delta_t;
+		shear_two = v_B / (L) * delta_t;
+	}
+	else {
+		// get the relation of all even values, this is basically the interaction relation this particle will have with other particles
+		m_i_one = m;
+		m_i_two = 1.0;
+
+		// set the appropriate diffusion parameters according to index of particle
+		weigh_brown_one = weigh_brown_B;
+		weigh_brown_two = weigh_brown_A;
+
+		D_kT_one = D_Brown_B/kT;
+		D_kT_two = D_Brown_A/kT;
+
+		shear_one = v_B / (L) * delta_t;
+		shear_two = v_A / (L) * delta_t;
+	}
+
+	// let the simulation run until the thread is terminated
 	while(cont == 1) {
-EOF
+		// iterate 2D-forces over all particles A in Verlet-List
+		for (int i=min; i<max; i+=2) {
+			// get the position of the current particle
+			xi = position[2*i];
+			yi = position[2*i+1];
 
-	# calculate lower and upper limit of one thread's particle numbers
-	part_no_low = 1.0*t*N_thread
-	part_no_hig = 1.0*(t+1)*N_thread
+			// initiate forces for this round
+			force[2*i]	 = 0;
+			force[2*i+1] = 0;
 
-#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+			// check that the distance to the bottom is not too small
+			if (yi <= 1e-12) {
+				dist_bottom = 1e-12;
+				force[2*i+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			}
+			else if (yi <= dist_cutoff) {
+				dist_bottom = yi;
+				force[2*i+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			}
 
-	# iterate over all particles
-	for i in part_no_low.round() .. (part_no_hig.round()-1)
-		
-		# check if this is an A or B particle
-		if i < N_A then
-			
-				sim.puts("			xi = position[2*"+i.to_s+"];")
-				sim.puts("			yi = position[2*"+i.to_s+"+1];\n\n")
+			// check that the distance to the top is not too small
+			if (L - yi <= 1e-12) {
+				dist_top = 1e-12;
+				force[2*i+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
+			}
+			else if (L - yi <= dist_cutoff) {
+				dist_top = L-yi;
+				force[2*i+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
+			}
 
-				sim.puts("			force[2*"+i.to_s+"]	 = 0;")
-				sim.puts("			force[2*"+i.to_s+"+1] = 0;\n\n")
+			// get the amount of particles we have to iterate
+			iterate = verlet[N*(i+1)-1];
 
-				sim.puts("			if (yi <= 1e-12) {")
-					sim.puts("				dist_bottom = 1e-12;")
-					sim.puts("				force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
-				sim.puts("			}")
-				sim.puts("			else if (yi <= dist_cutoff) {")
-					sim.puts("				dist_bottom = yi;")
-					sim.puts("				force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
-				sim.puts("			}\n\n")
+			// iterate to number given in last entry of i in Verlet-List
+			for (int k=0; k<iterate; k+=1) {
+				// get the next particle and it's position within the root box
+				j  = verlet[N*i+k];
+				xj = position[2*j];
+				yj = position[2*j+1];
 
-				sim.puts("			if (L_y - yi <= 1e-12) {")
-					sim.puts("				dist_top = 1e-12;")
-					sim.puts("				force[2*"+i.to_s+"+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;")
-				sim.puts("			}")
-				sim.puts("			else if (L_y - yi <= dist_cutoff) {")
-					sim.puts("				dist_top = L_y-yi;")
-					sim.puts("				force[2*"+i.to_s+"+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;")
-				sim.puts("			}\n\n")
+				// assign the appropriate interaction relation to the particle, depending whether it has even or uneven index
+				m_j = (j%2)*m + (j+1)%2;
 
-				sim.puts("			iterate = verlet[N*("+i.to_s+"+1)-1];\n\n")
+				// Get the distance between both particles
+				dx = xi - xj;
+				dy = yi - yj;
 
+ 				// find images through altering dx and dy
+				dx 		-= dround(dx*Li)*L;
 
-			sim.puts <<EOF	
-			for (int k=0; k<iterate; k+=1) {\n
-EOF
-			sim.puts("			j  = verlet[N*"+i.to_s+"+k];")
-			sim.puts <<EOF
-			xj = position[2*j];
-			yj = position[2*j+1];
+				// get square of distance and compute force in x and y direction
+				r_squared = dx*dx + dy*dy;
+				temp_force = (m_i_one*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff); // WARNING: this is F/r
 
-			m_j = (j%2)*m + (j+1)%2;
+				force[2*i] 		+= temp_force*dx; // equals F*x/r = F*cos(phi) (x-component)
+				force[2*i+1]	+= temp_force*dy; // equals F*y/r = F*sin(phi) (y-component)
+			}
+		}
 
-			dx = xi - xj;
-			dy = yi - yj;
+		// iterate 2D-forces over all particles B in Verlet-List
+		for (int i=min+1; i<max; i+=2) {
+			// get the position of the current particle
+			xi = position[2*i];
+			yi = position[2*i+1];
 
-			dx 		-= dround(dx/L_x)*L_x;
+			// initiate forces for this round
+			force[2*i]	 = 0;
+			force[2*i+1] = 0;
 
-			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			// check that the distance to the bottom is not too small
+			if (yi <= 1e-12) {
+				dist_bottom = 1e-12;
+				force[2*i+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			}
+			else if (yi <= dist_cutoff) {
+				dist_bottom = yi;
+				force[2*i+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			}
 
-EOF
-			sim.puts("			force[2*"+i.to_s+"] 		+= temp_force*dx;")
-			sim.puts("			force[2*"+i.to_s+"+1]	+= temp_force*dy;")
-			sim.puts("		}\n\n")
-		else
+			// check that the distance to the top is not too small
+			if (L - yi <= 1e-12) {
+				dist_top = 1e-12;
+				force[2*i+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
+			}
+			else if (L - yi <= dist_cutoff) {
+				dist_top = L-yi;
+				force[2*i+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
+			}
 
-				sim.puts("		xi = position[2*"+i.to_s+"];")
-				sim.puts("		yi = position[2*"+i.to_s+"+1];\n\n")
+			if (yi <= 0) {
+				fprintf(stderr, "%d: \t%lf\t%lf\t%lf\n", i, yi, dist_bottom, force[2*i+1]);
+			}
+			if (yi >= L) {
+				fprintf(stderr, "%d: \t%lf\t%lf\t%lf\t%lf\n", i, yi, dist_top, force[2*i+1], L);
+			}
+			// get the amount of particles we have to iterate
+			iterate = verlet[N*(i+1)-1];
 
-				sim.puts("		force[2*"+i.to_s+"]	 = 0;")
-				sim.puts("		force[2*"+i.to_s+"+1] = 0;\n\n")
+			// iterate to number given in last entry of i in Verlet-List
+			for (int k=0; k<iterate; k+=1) {
+				// get the next particle and it's position within the root box
+				j  = verlet[N*i+k];
+				xj = position[2*j];
+				yj = position[2*j+1];
 
-				sim.puts("		if (yi <= 1e-12) {")
-					sim.puts("			dist_bottom = 1e-12;")
-					sim.puts("			force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
-				sim.puts("		}")
-				sim.puts("		else if (yi <= dist_cutoff) {")
-					sim.puts("			dist_bottom = yi;")
-					sim.puts("			force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
-				sim.puts("		}\n\n")
+				// assign the appropriate interaction relation to the particle, depending whether it has even or uneven number
+				m_j = (j%2)*m + (j+1)%2;
 
-				sim.puts("			if (L_y - yi <= 1e-12) {")
-					sim.puts("				dist_top = 1e-12;")
-					sim.puts("				force[2*"+i.to_s+"+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;")
-				sim.puts("			}")
-				sim.puts("			else if (L_y - yi <= dist_cutoff) {")
-					sim.puts("				dist_top = L_y-yi;")
-					sim.puts("				force[2*"+i.to_s+"+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;")
-				sim.puts("			}\n\n")
+				// Get the distance between both particles
+				dx = xi - xj;
+				dy = yi - yj;
 
+ 				// find images through altering dx and dy
+				dx		-= dround(dx*Li)*L;
 
-				sim.puts("		iterate = verlet[N*("+i.to_s+"+1)-1];\n\n")
+				// get square of distance and compute force in x and y direction
+				r_squared = dx*dx + dy*dy;
+				temp_force = (m_i_two*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff); // WARNING: this is F/r
 
-			sim.puts <<EOF	
-			for (int k=0; k<iterate; k+=1) {\n
-EOF
-			sim.puts("			j  = verlet[N*"+i.to_s+"+k];")
-			sim.puts <<EOF
-			xj = position[2*j];
-			yj = position[2*j+1];
+				force[2*i] 		+= temp_force*dx; // equals F*x/r = F*cos(phi) (x-component)
+				force[2*i+1]	+= temp_force*dy; // equals F*y/r = F*sin(phi) (y-component)
+			}
+		}
 
-			m_j = (j%2)*m + (j+1)%2;
+		// wait for all threads to finish iteration of forces, then continue with writing position data
+		pthread_barrier_wait(&barrier_internal);
 
-			dx = xi - xj;
-			dy = yi - yj;
+		// compute new positions for particles A from forces, remember periodic boundary conditions
+		for (int i=min; i<max; i+=2) {
 
-			dx 		-= dround(dx/L_x)*L_x;
+			xi = position[2*i];
+			yi = position[2*i+1];
 
-			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
-
-EOF
-			sim.puts("			force[2*"+i.to_s+"] 		+= temp_force*dx;")
-			sim.puts("			force[2*"+i.to_s+"+1]	+= temp_force*dy;")
-			sim.puts("		}\n\n")
-		end
-	end
-
-	sim.puts("		pthread_barrier_wait(&barrier_internal);\n\n")
-
-#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
-
-
-	# iterate over all particles
-	for i in part_no_low.round() .. (part_no_hig.round()-1)
-		
-		# check if this is an A or B particle
-		if i < N_A then
-			sim.puts("		xi = position[2*"+i.to_s+"];")
-			sim.puts("		yi = position[2*"+i.to_s+"+1];\n\n")
-
-			sim.puts <<EOF
+			// use Box-Muller-method in order to obtain two independent standard normal values
 			do {
 				u1 = rand()/(double)RAND_MAX;
 			} while (u1 == 0.0);
@@ -507,35 +507,38 @@ EOF
 			g1 = temp*cos(TWO_PI*u2);
 			g2 = temp*sin(TWO_PI*u2);
 
-EOF
+			// Calculate next positions and total displacement for all particles
+			dx = D_kT_one*delta_t*force[2*i]   + weigh_brown_one * g1 + position[2*i+1]*shear_one;
+			dy = D_kT_one*delta_t*force[2*i+1] + weigh_brown_one * g2;
 
-			sim.puts("		dx = D_kT_A*delta_t*force[2*"+i.to_s+"]   + weigh_brown_A * g1 + (position[2*"+i.to_s+"+1] - 0.5*L_y)*shear_A;")
-			sim.puts("		dy = D_kT_A*delta_t*force[2*"+i.to_s+"+1] + weigh_brown_A * g2;\n\n")
+			position[2*i]		+= dx;
+			position[2*i+1] 	+= dy;
 
-			sim.puts("		position[2*"+i.to_s+"]		+= dx;")
-			sim.puts("		position[2*"+i.to_s+"+1] 	+= dy;\n\n")
+			displacement[2*i]	+= dx;
+			displacement[2*i+1] += dy;
 
-			sim.puts("		displacement[2*"+i.to_s+"]	+= dx;")
-			sim.puts("		displacement[2*"+i.to_s+"+1] += dy;\n\n")
+			// update list of total displacement for each particle after last verlet-list update
+			verlet_distance[2*i] 	+= (xi - position[2*i]);
+			verlet_distance[2*i+1] 	+= (yi - position[2*i+1]);
 
-			sim.puts("		verlet_distance[2*"+i.to_s+"] 	+= (xi - position[2*"+i.to_s+"]);")
-			sim.puts("		verlet_distance[2*"+i.to_s+"+1] 	+= (yi - position[2*"+i.to_s+"+1]);\n\n")
+			if ((temp = sqrt(verlet_distance[2*i]*verlet_distance[2*i] + verlet_distance[2*i+1]*verlet_distance[2*i+1])) > verlet_max[2*(*no)]) {
+				verlet_max[2*(*no)+1] = verlet_max[2*(*no)];
+				verlet_max[2*(*no)] = temp;
+			} else if (temp > verlet_max[2*(*no)+1]) {
+				verlet_max[2*(*no)+1] = temp;
+			}
 
-			sim.puts("		if ((temp = sqrt(verlet_distance[2*"+i.to_s+"]*verlet_distance[2*"+i.to_s+"] + verlet_distance[2*"+i.to_s+"+1]*verlet_distance[2*"+i.to_s+"+1])) > verlet_max[2*(*no)]) {")
-			sim.puts <<EOF
-			verlet_max[2*(*no)+1] = verlet_max[2*(*no)];
-			verlet_max[2*(*no)] = temp;
-		} else if (temp > verlet_max[2*(*no)+1]) {
-			verlet_max[2*(*no)+1] = temp;
+			// Calculate x positions with periodic boundary conditions, check whether the particle moved from one row to another
+			position[2*i] 	-= floor(position[2*i]*Li)*L;
 		}
 
-EOF
-			sim.puts("		position[2*"+i.to_s+"] 	-= floor(position[2*"+i.to_s+"]/L_x)*L_x;\n\n")
-		else
-			sim.puts("		xi = position[2*"+i.to_s+"];")
-			sim.puts("		yi = position[2*"+i.to_s+"+1];\n\n")
+		// compute new positions for particles B from forces, remember periodic boundary conditions
+		for (int i=min+1; i<max; i+=2) {
 
-			sim.puts <<EOF
+			xi = position[2*i];
+			yi = position[2*i+1];
+
+			// use Box-Muller-method in order to obtain two independent standard normal values
 			do {
 				u1 = rand()/(double)RAND_MAX;
 			} while (u1 == 0.0);
@@ -547,33 +550,31 @@ EOF
 			g1 = temp*cos(TWO_PI*u2);
 			g2 = temp*sin(TWO_PI*u2);
 
-EOF
-			sim.puts("		dx = D_kT_B*delta_t*force[2*"+i.to_s+"]   + weigh_brown_B * g1;")
-			sim.puts("		dy = D_kT_B*delta_t*force[2*"+i.to_s+"+1] + weigh_brown_B * g2;\n\n")
+			// Calculate next positions and total displacement for all particles
+			dx = D_kT_two*delta_t*force[2*i]   + weigh_brown_two * g1 + position[2*i+1]*shear_two;
+			dy = D_kT_two*delta_t*force[2*i+1] + weigh_brown_two * g2;
 
-			sim.puts("		position[2*"+i.to_s+"]		+= dx;")
-			sim.puts("		position[2*"+i.to_s+"+1] 	+= dy;\n\n")
+			position[2*i]		+= dx;
+			position[2*i+1] 	+= dy;
 
-			sim.puts("		displacement[2*"+i.to_s+"]	+= dx;")
-			sim.puts("		displacement[2*"+i.to_s+"+1] += dy;\n\n")
+			displacement[2*i]	+= dx;
+			displacement[2*i+1] += dy;
 
-			sim.puts("		verlet_distance[2*"+i.to_s+"] 	+= (xi - position[2*"+i.to_s+"]);")
-			sim.puts("		verlet_distance[2*"+i.to_s+"+1] 	+= (yi - position[2*"+i.to_s+"+1]);\n\n")
+			// update list of total displacement for each particle after last verlet-list update
+			verlet_distance[2*i] 	+= (xi - position[2*i]);
+			verlet_distance[2*i+1] 	+= (yi - position[2*i+1]);
 
-			sim.puts("		if ((temp = sqrt(verlet_distance[2*"+i.to_s+"]*verlet_distance[2*"+i.to_s+"] + verlet_distance[2*"+i.to_s+"+1]*verlet_distance[2*"+i.to_s+"+1])) > verlet_max[2*(*no)]) {")
-			sim.puts <<EOF
-			verlet_max[2*(*no)+1] = verlet_max[2*(*no)];
-			verlet_max[2*(*no)] = temp;
-		} else if (temp > verlet_max[2*(*no)+1]) {
-			verlet_max[2*(*no)+1] = temp;
+			if ((temp = sqrt(verlet_distance[2*i]*verlet_distance[2*i] + verlet_distance[2*i+1]*verlet_distance[2*i+1])) > verlet_max[2*(*no)]) {
+				verlet_max[2*(*no)+1] = verlet_max[2*(*no)];
+				verlet_max[2*(*no)] = temp;
+			} else if (temp > verlet_max[2*(*no)+1]) {
+				verlet_max[2*(*no)+1] = temp;
+			}
+
+			// Calculate x positions with periodic boundary conditions, check whether the particle moved from one row to another
+			position[2*i] 	-= floor(position[2*i]*Li)*L;
 		}
 
-EOF
-			sim.puts("		position[2*"+i.to_s+"] 	-= floor(position[2*"+i.to_s+"]/L_x)*L_x;\n\n")
-		end
-	end
-
-	sim.puts <<EOF
 		// Signal to main thread, that all threads have finished their iteration
 		pthread_barrier_wait(&barrier_main_one);
 
@@ -586,12 +587,6 @@ EOF
 
 
 
-EOF
-end
-
-#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
-# write the actual simulation function which will call all the threads
-sim.puts <<EOF
 /*-------------------------------------------------------------------------------------------------------*/
 void simulation (void) {
 
@@ -619,7 +614,7 @@ void simulation (void) {
 
 	FILE *file = fopen(job, "w+");
 	if (file == NULL) {
-		fprintf(stderr, "File \\"%s\\" could not be opened, program will terminate. \\n", job);
+		fprintf(stderr, "File \"%s\" could not be opened, program will terminate. \n", job);
 		return;
 	}
 
@@ -628,14 +623,14 @@ void simulation (void) {
 	cont = 1;
 
 	// fill the attribute struct with values
-	attr->Num 			= N;
+	attr->N 			= N;
 	attr->Gamma_A		= Gamma_A;
 	attr->m 			= m;
-	attr->X				= X_A;
-	attr->gamma_shear 	= gamma_shear;
+	attr->X_A			= X_A;
+	attr->gamma 		= gamma;
 	attr->D_rat			= D_rat;
 	attr->L_x			= L_x;
-	attr->L_y_attr		= L_y;
+	attr->L_y 			= L_y;
 	attr->max_writeouts = max_timesteps/write_step;
 	attr->tau 			= tau;
 	attr->write_step	= write_step;
@@ -652,7 +647,7 @@ void simulation (void) {
 
 		// iterate what timestep we are at
 		timesteps = write_step * written;
-		fprintf(file, "Timestep: %d\\n", timesteps);
+		fprintf(file, "Timestep: %d\n", timesteps);
 	}
 	else {
 		write_data(timesteps, position, displacement);
@@ -661,34 +656,34 @@ void simulation (void) {
 	// increase timestep counter
 	timesteps ++;
 
-	// initiate the threads own numbers
-	for (int i=0; i<thread_number; i++) {
+	// compute borders of all threads
+	for(int i=0; i<(thread_number); i++) {
+		borders[i] = i*(int)(N/thread_number);
 		numbers[i] = i;
 	}
+
+	borders[thread_number] = N;
 
 	// Initiate Threads and barrier, catch problems, number of threads is given in config-file
 	pthread_barrier_init(&barrier_main_one, NULL, thread_number+1);
 	pthread_barrier_init(&barrier_main_two, NULL, thread_number+1);
 	pthread_barrier_init(&barrier_internal, NULL, thread_number);
 
-EOF
+	for (int i=0; i<thread_number; i++) {
+		ret_thread 	= pthread_create(&(threads[i]), NULL, (void*)&iteration, &(numbers[i]));
 
-for t in 0..(thread_number-1)
-	sim.puts("	ret_thread 	= pthread_create(&(threads["+t.to_s+"]), NULL, (void*)&iteration_"+t.to_s+", &(numbers["+t.to_s+"]));\n\n")
-	sim.puts("	if (ret_thread != 0) {")
-	sim.puts("		fprintf(stderr, \"Thread %d could not be created. \\n\", "+t.to_s+");")
-	sim.puts("		exit(EXIT_FAILURE);")
-	sim.puts("	}")
-end
-
-sim.puts <<EOF
+		if (ret_thread != 0) {
+			fprintf(stderr, "Thread %d could not be created. \n", i);
+			exit(EXIT_FAILURE);
+		}
+	}
 
 	// save time at iteration start and output simulation start to user
 	time(&init_time);
 	time_string = ctime(&init_time);
 
 	fprintf(file, "Starting simulation ID: %d at %s"
-					"Parameters N: %d, m: %.2lf, Gamma: %.0lf, Shear: %.0lf, Steps: %d\\n\\n", sim_number, time_string, N, m, Gamma_A, gamma_shear, max_timesteps);
+					"Parameters N: %d, m: %.2lf, Gamma: %.0lf, Shear: %.0lf, Steps: %d\n\n", sim_number, time_string, N, m, Gamma_A, v_s, max_timesteps);
 	fflush(file);
 
 	// iterate over all timesteps
@@ -725,7 +720,7 @@ sim.puts <<EOF
 			rem_time = current_time - init_time;
 
 			// give user a coherent overview
-			fprintf(file, "ID: %d, Progress: \\t\\t[", sim_number);
+			fprintf(file, "ID: %d, Progress: \t\t[", sim_number);
 
 			for(int i=0; i<floor(perc); i++) {
 				fprintf(file, "=");
@@ -738,7 +733,7 @@ sim.puts <<EOF
 				fprintf(file, ".");
 			}
 
-			fprintf(file, "] \\t%.1lf%%\\t\\telapsed time: %d s\\r", perc, (int)(rem_time));
+			fprintf(file, "] \t%.1lf%%\t\telapsed time: %d s\r", perc, (int)(rem_time));
 
 			fflush(file);
 		}
@@ -764,17 +759,19 @@ sim.puts <<EOF
 	free(verlet_distance);
 	free(verlet_max);
 	free(threads);
+	free(borders);
 	free(numbers);
 
 	// compute runtime, give information to user and leave program
 	time(&current_time);
 	time_string = ctime(&current_time);
 
-	fprintf(file, "\\n\\nFinished simulation ID: %d at %s"
-					"Parameters N: %d, m: %.2lf, Gamma: %.0lf, Shear: %.0lf, Steps: %d\\n"
-					"Elapsed time: %d seconds\\n\\n", sim_number, time_string, N, m, Gamma_A, gamma_shear, max_timesteps, (int)(current_time - init_time));
+	fprintf(file, "\n\nFinished simulation ID: %d at %s"
+					"Parameters N: %d, m: %.2lf, Gamma: %.0lf, Shear: %.0lf, Steps: %d\n"
+					"Elapsed time: %d seconds\n\n", sim_number, time_string, N, m, Gamma_A, v_s, max_timesteps, (int)(current_time - init_time));
 	fflush(file);
 	fclose(file);
 }
-EOF
+
+
 

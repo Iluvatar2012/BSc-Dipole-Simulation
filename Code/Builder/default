@@ -1,0 +1,7 @@
+tau				10
+dt 				0.000001
+writestep		10000
+D_rat			1.7
+m				0.1 		1.0 		0.5
+Gamma 			10 			20 			10
+shear_gamma		0			20 			5
