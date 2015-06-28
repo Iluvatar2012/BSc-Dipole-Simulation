@@ -10,7 +10,6 @@ struct parameters {
 	// system properties
 	double 	Gamma_A;
 	double 	m;
-	double 	X_A;
 
 	double 	gamma_shear;
 	double 	D_rat;
@@ -29,7 +28,7 @@ struct attributes {
 	int 	Num;
 	double 	Gamma_A;
 	double	m;
-	double 	X_A;
+	double 	X;
 	double 	gamma_shear;
 	double 	D_rat;
 

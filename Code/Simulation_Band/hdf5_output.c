@@ -90,31 +90,31 @@ int create_file (char* infile, struct attributes *attr) {
 	attr_id_1		= H5Acreate2(pos_dataset_id, "Writeouts", H5T_NATIVE_INT, attr_space_id_1, H5P_DEFAULT, H5P_DEFAULT);
 	attr_id_2		= H5Acreate2(pos_dataset_id, "N", H5T_NATIVE_INT, attr_space_id_2, H5P_DEFAULT, H5P_DEFAULT);
 	attr_id_3		= H5Acreate2(pos_dataset_id, "Last_Writeout", H5T_NATIVE_INT, attr_space_id_3, H5P_DEFAULT, H5P_DEFAULT);
-	attr_id_4		= H5Acreate2(pos_dataset_id, "Gamma_A", H5T_NATIVE_INT, attr_space_id_4, H5P_DEFAULT, H5P_DEFAULT);
-	attr_id_5		= H5Acreate2(pos_dataset_id, "m", H5T_NATIVE_INT, attr_space_id_5, H5P_DEFAULT, H5P_DEFAULT);
-	attr_id_6		= H5Acreate2(pos_dataset_id, "X_A", H5T_NATIVE_INT, attr_space_id_6, H5P_DEFAULT, H5P_DEFAULT);
-	attr_id_7		= H5Acreate2(pos_dataset_id, "gamma", H5T_NATIVE_INT, attr_space_id_7, H5P_DEFAULT, H5P_DEFAULT);
-	attr_id_8		= H5Acreate2(pos_dataset_id, "D_rat", H5T_NATIVE_INT, attr_space_id_8, H5P_DEFAULT, H5P_DEFAULT);
-	attr_id_9		= H5Acreate2(pos_dataset_id, "L_x", H5T_NATIVE_INT, attr_space_id_9, H5P_DEFAULT, H5P_DEFAULT);
-	attr_id_10		= H5Acreate2(pos_dataset_id, "L_y", H5T_NATIVE_INT, attr_space_id_10, H5P_DEFAULT, H5P_DEFAULT);
+	attr_id_4		= H5Acreate2(pos_dataset_id, "Gamma_A", H5T_NATIVE_DOUBLE, attr_space_id_4, H5P_DEFAULT, H5P_DEFAULT);
+	attr_id_5		= H5Acreate2(pos_dataset_id, "m", H5T_NATIVE_DOUBLE, attr_space_id_5, H5P_DEFAULT, H5P_DEFAULT);
+	attr_id_6		= H5Acreate2(pos_dataset_id, "X_A", H5T_NATIVE_DOUBLE, attr_space_id_6, H5P_DEFAULT, H5P_DEFAULT);
+	attr_id_7		= H5Acreate2(pos_dataset_id, "gamma", H5T_NATIVE_DOUBLE, attr_space_id_7, H5P_DEFAULT, H5P_DEFAULT);
+	attr_id_8		= H5Acreate2(pos_dataset_id, "D_rat", H5T_NATIVE_DOUBLE, attr_space_id_8, H5P_DEFAULT, H5P_DEFAULT);
+	attr_id_9		= H5Acreate2(pos_dataset_id, "L_x", H5T_NATIVE_DOUBLE, attr_space_id_9, H5P_DEFAULT, H5P_DEFAULT);
+	attr_id_10		= H5Acreate2(pos_dataset_id, "L_y", H5T_NATIVE_DOUBLE, attr_space_id_10, H5P_DEFAULT, H5P_DEFAULT);
 	attr_id_11		= H5Acreate2(pos_dataset_id, "tau", H5T_NATIVE_INT, attr_space_id_11, H5P_DEFAULT, H5P_DEFAULT);
 	attr_id_12		= H5Acreate2(pos_dataset_id, "Write_Step", H5T_NATIVE_INT, attr_space_id_12, H5P_DEFAULT, H5P_DEFAULT);
-	attr_id_13		= H5Acreate2(pos_dataset_id, "Timestep", H5T_NATIVE_INT, attr_space_id_13, H5P_DEFAULT, H5P_DEFAULT);
+	attr_id_13		= H5Acreate2(pos_dataset_id, "Timestep", H5T_NATIVE_DOUBLE, attr_space_id_13, H5P_DEFAULT, H5P_DEFAULT);
 
 	// write the attributes
 	status = H5Awrite(attr_id_1, H5T_NATIVE_INT, &(attr->max_writeouts));
 	status = H5Awrite(attr_id_2, H5T_NATIVE_INT, &(attr->Num));
 	status = H5Awrite(attr_id_3, H5T_NATIVE_INT, &counter);
-	status = H5Awrite(attr_id_4, H5T_NATIVE_INT, &(attr->Gamma_A));
-	status = H5Awrite(attr_id_5, H5T_NATIVE_INT, &(attr->m));
-	status = H5Awrite(attr_id_6, H5T_NATIVE_INT, &(attr->X_A));
-	status = H5Awrite(attr_id_7, H5T_NATIVE_INT, &(attr->gamma_shear));
-	status = H5Awrite(attr_id_8, H5T_NATIVE_INT, &(attr->D_rat));
-	status = H5Awrite(attr_id_9, H5T_NATIVE_INT, &(attr->L_x));
-	status = H5Awrite(attr_id_10, H5T_NATIVE_INT, &(attr->L_y_attr));
+	status = H5Awrite(attr_id_4, H5T_NATIVE_DOUBLE, &(attr->Gamma_A));
+	status = H5Awrite(attr_id_5, H5T_NATIVE_DOUBLE, &(attr->m));
+	status = H5Awrite(attr_id_6, H5T_NATIVE_DOUBLE, &(attr->X));
+	status = H5Awrite(attr_id_7, H5T_NATIVE_DOUBLE, &(attr->gamma_shear));
+	status = H5Awrite(attr_id_8, H5T_NATIVE_DOUBLE, &(attr->D_rat));
+	status = H5Awrite(attr_id_9, H5T_NATIVE_DOUBLE, &(attr->L_x));
+	status = H5Awrite(attr_id_10, H5T_NATIVE_DOUBLE, &(attr->L_y_attr));
 	status = H5Awrite(attr_id_11, H5T_NATIVE_INT, &(attr->tau));
 	status = H5Awrite(attr_id_12, H5T_NATIVE_INT, &(attr->write_step));
-	status = H5Awrite(attr_id_13, H5T_NATIVE_INT, &(attr->timestep));
+	status = H5Awrite(attr_id_13, H5T_NATIVE_DOUBLE, &(attr->timestep));
 
 	// terminate access to all parts of the document and close the file
 	status = H5Aclose(attr_id_1);

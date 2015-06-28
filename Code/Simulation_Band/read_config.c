@@ -26,15 +26,15 @@
 
 /*-------------------------------------------------------------------------------------------------------*/
 /* Template for config file:
-*	Number of particles (N)              	: 1000
-*	Dipole interaction relation (Gamma_A)  	: 10
-*	Particle dipole ratio (m)				: 0.1
-*	Shear rate A (shear_A)               	: 10
-*	Time difference (delta_t)            	: 1e-6
-*	Destination file (outfile)           	: Results/great_file_name.hdf5
-*	Iterations                           	: 100000
-*	Writeouts                            	: 1000
- *
+	Dipole interaction relation (Gamma_A)	: 10
+	Particle dipole ratio (m)				: 1.0
+	Shear rate (gamma)		               	: 20
+	Particle Diffusion ratio (D_rat)		: 1.7
+	Time difference (delta_t)            	: 0.000001
+	Iteration time (tau)                  	: 10
+	Writeout step                           : 1000
+	Destination file (outfile)           	: Results/default.hdf5
+ 
  * */
 struct parameters *read_file(char* file) {
 	// open configuration file, check whether operation was successful
@@ -57,8 +57,6 @@ struct parameters *read_file(char* file) {
 		return NULL;
 	if ((check = fscanf(infile, "Particle dipole ratio (m)				: %lf\n", (&(param->m)))) < 1)
 		return NULL;
-	if ((check = fscanf(infile, "Particle ratio (X_A)						: %lf\n", (&(param->X_A)))) < 1)
-		return NULL;
 	if ((check = fscanf(infile, "Shear rate (gamma)		               	: %lf\n", (&(param->gamma_shear)))) < 1)
 		return NULL;
 	if ((check = fscanf(infile, "Particle Diffusion ratio (D_rat)		: %lf\n", (&(param->D_rat)))) < 1)
@@ -67,7 +65,7 @@ struct parameters *read_file(char* file) {
 		return NULL;
 	if ((check = fscanf(infile, "Iteration time (tau)                  	: %d\n",  (&(param->tau)))) < 1)
 		return NULL;
-	if ((check = fscanf(infile, "Writeout step                          : %d",    (&(param->write_step)))) < 1)
+	if ((check = fscanf(infile, "Writeout step                          : %d\n",    (&(param->write_step)))) < 1)
 		return NULL;
 	if ((check = fscanf(infile, "Destination file (outfile)           	: %s\n",  temp)) < 1)
 		return NULL;

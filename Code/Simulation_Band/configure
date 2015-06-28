@@ -3,12 +3,11 @@
 
 # define number and particle ratio variables, N > 0, 0.0 < X < 1.0
 N = 300
-X = 0.5
+X = ARGV[0].to_f
 
 # define system parameters
 thread_number 	= 16
 L_y 			= 2
-
 
 # calculate the number of A particles, X=0, means no, X=1 means exlusively A particles
 N_A = (N*X).round
@@ -20,8 +19,6 @@ N_thread = 1.0*N/thread_number
 if File.exist?('simulation.c') then
 	File.delete('simulation.c');
 end
-
-
 
 # open a new file and start writing C code into it
 sim = File.open("simulation.c", 'w');
@@ -39,6 +36,7 @@ EOF
 sim.puts("#define		N 					" + N.to_s)
 sim.puts("#define		thread_number		" + thread_number.to_s)
 sim.puts("#define 	L_y					" + L_y.to_s)
+sim.puts("#define 	X_A					" + X.to_s)
 
 #------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
 sim.puts <<EOF
@@ -82,7 +80,6 @@ static int 	  sim_number;
 // Particle properties
 static double Gamma_A;
 static double m;
-static double X_A;
 
 // Arrays for mechanical movement
 static double* force;
@@ -190,7 +187,6 @@ int init(struct parameters *param, double* init_positions) {
 	// copy values from incoming struct
 	Gamma_A			= param->Gamma_A;
 	m 				= param->m;
-	X_A				= param->X_A;
 
 	gamma_shear 	= param->gamma_shear;
 	D_rat			= param->D_rat;
@@ -203,12 +199,6 @@ int init(struct parameters *param, double* init_positions) {
 	// check whether particle species orientation is correct
 	if (D_rat < 1) {
 		fprintf(stderr, "Value D_rat is smaller than 1.0, consider switching particle species properties. D_rat: %lf1.3\\n", D_rat);
-		return EXIT_FAILURE;
-	}
-
-	// check whether particle species ratio is correct
-	if (X_A < 0 || X_A > 1) {
-		fprintf(stderr, "Value X must be between 0 and 1 including, check configuration file and rerun. X: %lf\\n", X_A);
 		return EXIT_FAILURE;
 	}
 
@@ -398,12 +388,12 @@ EOF
 				sim.puts("			}\n\n")
 
 				sim.puts("			if (L_y - yi <= 1e-12) {")
-					sim.puts("				dist_bottom = 1e-12;")
-					sim.puts("				force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
+					sim.puts("				dist_top = 1e-12;")
+					sim.puts("				force[2*"+i.to_s+"+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;")
 				sim.puts("			}")
 				sim.puts("			else if (L_y - yi <= dist_cutoff) {")
-					sim.puts("				dist_bottom = yi;")
-					sim.puts("				force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
+					sim.puts("				dist_top = L_y-yi;")
+					sim.puts("				force[2*"+i.to_s+"+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;")
 				sim.puts("			}\n\n")
 
 				sim.puts("			iterate = verlet[N*("+i.to_s+"+1)-1];\n\n")
@@ -448,12 +438,12 @@ EOF
 				sim.puts("			}\n\n")
 
 				sim.puts("			if (L_y - yi <= 1e-12) {")
-					sim.puts("				dist_bottom = 1e-12;")
-					sim.puts("				force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
+					sim.puts("				dist_top = 1e-12;")
+					sim.puts("				force[2*"+i.to_s+"+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;")
 				sim.puts("			}")
 				sim.puts("			else if (L_y - yi <= dist_cutoff) {")
-					sim.puts("				dist_bottom = yi;")
-					sim.puts("				force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
+					sim.puts("				dist_top = L_y-yi;")
+					sim.puts("				force[2*"+i.to_s+"+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;")
 				sim.puts("			}\n\n")
 
 				sim.puts("			iterate = verlet[N*("+i.to_s+"+1)-1];\n\n")
@@ -632,7 +622,7 @@ void simulation (void) {
 	attr->Num 			= N;
 	attr->Gamma_A		= Gamma_A;
 	attr->m 			= m;
-	attr->X_A			= X_A;
+	attr->X				= X_A;
 	attr->gamma_shear 	= gamma_shear;
 	attr->D_rat			= D_rat;
 	attr->L_x			= L_x;
@@ -661,6 +651,11 @@ void simulation (void) {
 
 	// increase timestep counter
 	timesteps ++;
+
+	// initiate the threads own numbers
+	for (int i=0; i<thread_number; i++) {
+		numbers[i] = i;
+	}
 
 	// Initiate Threads and barrier, catch problems, number of threads is given in config-file
 	pthread_barrier_init(&barrier_main_one, NULL, thread_number+1);

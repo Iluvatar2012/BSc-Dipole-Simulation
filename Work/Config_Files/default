@@ -1,8 +1,0 @@
-Dipole interaction relation (Gamma_A)	: 30.0
-Particle dipole ratio (m)				: 1.0
-Shear rate A (shear_A)               	: 500.0
-Particle Diffusion ratio (D_rat)		: 1.7
-Time difference (delta_t)            	: 0.000001
-Destination file (outfile)           	: Results/default.hdf5
-Iterations                           	: 1000000
-Writeout step                          	: 1000
