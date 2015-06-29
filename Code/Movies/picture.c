@@ -61,7 +61,7 @@ int initiate (struct parameters* param) {
 	atexit(SDL_Quit);
 
 	// set up the screen, this will be our frame, terminate if there was an error
-	screen = SDL_SetVideoMode(1200, 600, 16, SDL_HWSURFACE | SDL_DOUBLEBUF);
+	screen = SDL_SetVideoMode(1200, 800, 16, SDL_HWSURFACE | SDL_DOUBLEBUF);
 	if (screen == NULL) {
 		fprintf(stderr, "Could not set video mode: %s\n", SDL_GetError());
 		return EXIT_FAILURE;
@@ -126,36 +126,36 @@ void draw_picture(int step, char* file) {
 
 		// check in which row the particle is, reiterate position of x and y
 		if (posX < frac_X) {
-			posY += 0.25*L_y;
+			posY += 0.5*L_y;
 
 		} else if (posX < 2*frac_X) {
 			posX -= frac_X;
-			posY += 1.75*L_y;
+			posY += 2.5*L_y;
 
 		} else if (posX < 3*frac_X) {
 			posX -= 2*frac_X;
-			posY += 3.25*L_y;
+			posY += 4.5*L_y;
 
 		} else if (posX < 4*frac_X) {
 			posX -= 3*frac_X;
-			posY += 4.75*L_y;
+			posY += 6.5*L_y;
 
 		} else {
 			posX -= 4*frac_X;
-			posY += 6.25*L_y;
+			posY += 8.5*L_y;
 		}
 
 		// copy image to screen according to whether we need a A or B particle
-		if (i <= frac_A) {
+		if (i < frac_A) {
 			// compute x and y position of each dot
 			dst_even.x = round((posX/frac_X) *scrWidth - ball_A->w/2.);
-			dst_even.y = round((posY/(7.5*L_y))*scrHeight - ball_A->h/2.);
+			dst_even.y = round((posY/(10.0*L_y))*scrHeight - ball_A->h/2.);
 			SDL_BlitSurface(ball_A, NULL, screen, &dst_even);
 		}
 		else {
 			// compute x and y position of each dot
 			dst_uneven.x = round((posX/frac_X) *scrWidth - ball_B->w/2.);
-			dst_uneven.y = round((posY/(7.5*L_y))*scrHeight - ball_B->h/2.);
+			dst_uneven.y = round((posY/(10.0*L_y))*scrHeight - ball_B->h/2.);
 			SDL_BlitSurface(ball_B, NULL, screen, &dst_uneven);
 		}
 	}
