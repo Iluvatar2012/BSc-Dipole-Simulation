@@ -14,6 +14,14 @@ all:
 	@echo ' '
 	@echo ' '
 
+	$(MAKE) -C Density/ all
+
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	@echo ' '
+
 	$(MAKE) -C Equaliser/ all
 
 	@echo ' '
