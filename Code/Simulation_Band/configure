@@ -1,15 +1,14 @@
-#!/usr/bin/ruby
-# #!/software/ruby/2.2.2/login/bin/ruby
+#!/software/ruby/2.2.2/login/bin/ruby
 
 # get input from command line, convert to float and int respectively
-X 				= ARGV[0].to_f;
-thread_number 	= ARGV[1].to_i;
+X 				= ARGV[0].to_f
+thread_number 	= ARGV[1].to_i
 
 # define number and particle ratio variables, N > 0, 0.0 < X < 1.0
 N = 300
 
 # define system height
-L_y 		= 2
+L_y 		= 3
 
 # calculate the number of A particles, X=0, means no, X=1 means exlusively A particles
 N_A = (N*X).round
@@ -107,6 +106,7 @@ static double* verlet_distance;
 static double  verlet_max_1;
 static double  verlet_max_2;
 static double  d_cutoff_verlet;
+static double  d_cutoff_verlet_squared;
 static double  force_cutoff;
 
 // Other miscellaneous system variables, especially for thread handling
@@ -160,7 +160,7 @@ void update_verlet (void) {
 			r_squared = dx*dx + dy*dy;
 
 			// squaring is a strict monotonous function, thus we can check with the squares of the values (saves N*N sqrt()-calls)
-			if(cutoff_squared >= r_squared) {
+			if(d_cutoff_verlet_squared >= r_squared) {
 
 				// add neighbor and signums into verlet and sign list
 				verlet[N*i+k] 	= j;
@@ -222,19 +222,20 @@ int init(struct parameters *param, double* init_positions) {
 	kappa = 10.0;
 
 	// compute diffusion value of particle B, compute box speeds for particles A
-	D_Brown_B 			= D_Brown_A * D_rat;
-	v_A					= gamma_shear*D_Brown_A/kT;
+	D_Brown_B 				= D_Brown_A * D_rat;
+	v_A						= gamma_shear*D_Brown_A/kT;
 
 	// set values of remaining static variables
-	delta_t				= tau_B * timestep;
-	max_timesteps		= (int)(tau/timestep);
+	delta_t					= tau_B * timestep;
+	max_timesteps			= (int)(tau/timestep);
 
-	weigh_brown_A 		= sqrt(2.0 * D_Brown_A * delta_t);
-	weigh_brown_B 		= sqrt(2.0 * D_Brown_B * delta_t);
+	weigh_brown_A 			= sqrt(2.0 * D_Brown_A * delta_t);
+	weigh_brown_B 			= sqrt(2.0 * D_Brown_B * delta_t);
 
-	cutoff 				= (fmax(L_x, L_y)/2.0);
-	cutoff_squared 		= cutoff*cutoff;
-	d_cutoff_verlet 	= 0.16 * cutoff;	// equals 2.9/2.5-1, estimate for best runtime
+	cutoff 					= (fmax(L_x, L_y)/2.0);
+	cutoff_squared 			= cutoff*cutoff;
+	d_cutoff_verlet 		= 1.15 * cutoff;
+	d_cutoff_verlet_squared = d_cutoff_verlet*d_cutoff_verlet;
 
 	// compute the force at cutoff value, this force will be deducted from the system
 	force_cutoff	= 3*Gamma_A/(cutoff_squared*cutoff_squared);
@@ -346,6 +347,8 @@ for t in 0..(thread_number-1)
 	int iterate;
 	int j;
 
+	int cut;
+
 	double m_i_A = 1.0;
 	double m_i_B = m;
 
@@ -360,9 +363,7 @@ for t in 0..(thread_number-1)
 	double dist_top;
 
 	// cutoff for the walls force, this will lead to a smoother transition
-	double dist_cutoff 			= 1.0;
 	double prefactor			= 3.0;
-	double force_wall_cutoff 	= 1.0*prefactor *(kappa/dist_cutoff + 1.0/(dist_cutoff*dist_cutoff))*exp(-kappa*dist_cutoff);
 
 	while(cont == 1) {
 EOF
@@ -379,57 +380,6 @@ EOF
 		# check if this is an A or B particle
 		if i < N_A then
 			
-				sim.puts("			xi = position[2*"+i.to_s+"];")
-				sim.puts("			yi = position[2*"+i.to_s+"+1];\n\n")
-
-				sim.puts("			force[2*"+i.to_s+"]	 = 0;")
-				sim.puts("			force[2*"+i.to_s+"+1] = 0;\n\n")
-
-				sim.puts("			if (yi <= 1e-12) {")
-					sim.puts("				dist_bottom = 1e-12;")
-					sim.puts("				force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
-				sim.puts("			}")
-				sim.puts("			else if (yi <= dist_cutoff) {")
-					sim.puts("				dist_bottom = yi;")
-					sim.puts("				force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
-				sim.puts("			}\n\n")
-
-				sim.puts("			if (L_y - yi <= 1e-12) {")
-					sim.puts("				dist_top = 1e-12;")
-					sim.puts("				force[2*"+i.to_s+"+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;")
-				sim.puts("			}")
-				sim.puts("			else if (L_y - yi <= dist_cutoff) {")
-					sim.puts("				dist_top = L_y-yi;")
-					sim.puts("				force[2*"+i.to_s+"+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;")
-				sim.puts("			}\n\n")
-
-				sim.puts("			iterate = verlet[N*("+i.to_s+"+1)-1];\n\n")
-
-
-			sim.puts <<EOF	
-			for (int k=0; k<iterate; k+=1) {\n
-EOF
-			sim.puts("			j  = verlet[N*"+i.to_s+"+k];")
-			sim.puts <<EOF
-			xj = position[2*j];
-			yj = position[2*j+1];
-
-			m_j = (j%2)*m + (j+1)%2;
-
-			dx = xi - xj;
-			dy = yi - yj;
-
-			dx 		-= dround(dx/L_x)*L_x;
-
-			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
-
-EOF
-			sim.puts("			force[2*"+i.to_s+"] 		+= temp_force*dx;")
-			sim.puts("			force[2*"+i.to_s+"+1]	+= temp_force*dy;")
-			sim.puts("		}\n\n")
-		else
-
 				sim.puts("		xi = position[2*"+i.to_s+"];")
 				sim.puts("		yi = position[2*"+i.to_s+"+1];\n\n")
 
@@ -438,22 +388,21 @@ EOF
 
 				sim.puts("		if (yi <= 1e-12) {")
 					sim.puts("			dist_bottom = 1e-12;")
-					sim.puts("			force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
+					sim.puts("			force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);")
 				sim.puts("		}")
-				sim.puts("		else if (yi <= dist_cutoff) {")
+				sim.puts("		else {")
 					sim.puts("			dist_bottom = yi;")
-					sim.puts("			force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;")
+					sim.puts("			force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);")
 				sim.puts("		}\n\n")
 
-				sim.puts("			if (L_y - yi <= 1e-12) {")
-					sim.puts("				dist_top = 1e-12;")
-					sim.puts("				force[2*"+i.to_s+"+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;")
-				sim.puts("			}")
-				sim.puts("			else if (L_y - yi <= dist_cutoff) {")
-					sim.puts("				dist_top = L_y-yi;")
-					sim.puts("				force[2*"+i.to_s+"+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;")
-				sim.puts("			}\n\n")
-
+				sim.puts("		if (L_y - yi <= 1e-12) {")
+					sim.puts("			dist_top = 1e-12;")
+					sim.puts("			force[2*"+i.to_s+"+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);")
+				sim.puts("		}")
+				sim.puts("		else {")
+					sim.puts("			dist_top = L_y - yi;")
+					sim.puts("			force[2*"+i.to_s+"+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);")
+				sim.puts("		}\n\n")
 
 				sim.puts("		iterate = verlet[N*("+i.to_s+"+1)-1];\n\n")
 
@@ -473,7 +422,61 @@ EOF
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
+
+EOF
+			sim.puts("			force[2*"+i.to_s+"] 		+= temp_force*dx;")
+			sim.puts("			force[2*"+i.to_s+"+1]	+= temp_force*dy;")
+			sim.puts("		}\n\n")
+		else
+
+				sim.puts("		xi = position[2*"+i.to_s+"];")
+				sim.puts("		yi = position[2*"+i.to_s+"+1];\n\n")
+
+				sim.puts("		force[2*"+i.to_s+"]	 = 0;")
+				sim.puts("		force[2*"+i.to_s+"+1] = 0;\n\n")
+
+				sim.puts("		if (yi <= 1e-12) {")
+					sim.puts("			dist_bottom = 1e-12;")
+					sim.puts("			force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);")
+				sim.puts("		}")
+				sim.puts("		else {")
+					sim.puts("			dist_bottom = yi;")
+					sim.puts("			force[2*"+i.to_s+"+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);")
+				sim.puts("		}\n\n")
+
+				sim.puts("		if (L_y - yi <= 1e-12) {")
+					sim.puts("			dist_top = 1e-12;")
+					sim.puts("			force[2*"+i.to_s+"+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);")
+				sim.puts("		}")
+				sim.puts("		else {")
+					sim.puts("			dist_top = L_y - yi;")
+					sim.puts("			force[2*"+i.to_s+"+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);")
+				sim.puts("		}\n\n")
+
+				sim.puts("		iterate = verlet[N*("+i.to_s+"+1)-1];\n\n")
+
+			sim.puts <<EOF	
+			for (int k=0; k<iterate; k+=1) {\n
+EOF
+			sim.puts("			j  = verlet[N*"+i.to_s+"+k];")
+			sim.puts <<EOF
+			xj = position[2*j];
+			yj = position[2*j+1];
+
+			m_j = (j%2)*m + (j+1)%2;
+
+			dx = xi - xj;
+			dy = yi - yj;
+
+			dx 		-= dround(dx/L_x)*L_x;
+
+			r_squared = dx*dx + dy*dy;
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 EOF
 			sim.puts("			force[2*"+i.to_s+"] 		+= temp_force*dx;")
@@ -661,11 +664,6 @@ void simulation (void) {
 	// increase timestep counter
 	timesteps ++;
 
-	// initiate the threads own numbers
-	for (int i=0; i<thread_number; i++) {
-		numbers[i] = i;
-	}
-
 	// Initiate Threads and barrier, catch problems, number of threads is given in config-file
 	pthread_barrier_init(&barrier_main_one, NULL, thread_number+1);
 	pthread_barrier_init(&barrier_main_two, NULL, thread_number+1);
@@ -707,7 +705,7 @@ sim.puts <<EOF
 		}
 
 		// check if verlet list has to be updated
-		if ((verlet_max_1+verlet_max_2) > d_cutoff_verlet) {
+		if ((verlet_max_1+verlet_max_2) > (d_cutoff_verlet - cutoff)) {
 			update_verlet();
 			verlet_max_1 = 0;
 			verlet_max_2 = 0;

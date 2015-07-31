@@ -22,6 +22,14 @@ all:
 	@echo ' '
 	@echo ' '
 
+	$(MAKE) -C Histogram/ all
+
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	@echo ' '
+
 	$(MAKE) -C Movies/ all
 
 	@echo ' '
@@ -31,4 +39,4 @@ all:
 	@echo ' '
 
 
-	$(MAKE) -C Simulation_Band/ all
+	# $(MAKE) -C Simulation_Band/ all

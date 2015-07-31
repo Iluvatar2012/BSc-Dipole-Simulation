@@ -3,7 +3,7 @@
 // define constants of the simulation
 #define		N 					300
 #define		thread_number		8
-#define 	L_y					2
+#define 	L_y					3
 #define 	X_A					0.4
 
 #define 	kT					1.0
@@ -70,6 +70,7 @@ static double* verlet_distance;
 static double  verlet_max_1;
 static double  verlet_max_2;
 static double  d_cutoff_verlet;
+static double  d_cutoff_verlet_squared;
 static double  force_cutoff;
 
 // Other miscellaneous system variables, especially for thread handling
@@ -123,7 +124,7 @@ void update_verlet (void) {
 			r_squared = dx*dx + dy*dy;
 
 			// squaring is a strict monotonous function, thus we can check with the squares of the values (saves N*N sqrt()-calls)
-			if(cutoff_squared >= r_squared) {
+			if(d_cutoff_verlet_squared >= r_squared) {
 
 				// add neighbor and signums into verlet and sign list
 				verlet[N*i+k] 	= j;
@@ -185,19 +186,20 @@ int init(struct parameters *param, double* init_positions) {
 	kappa = 10.0;
 
 	// compute diffusion value of particle B, compute box speeds for particles A
-	D_Brown_B 			= D_Brown_A * D_rat;
-	v_A					= gamma_shear*D_Brown_A/kT;
+	D_Brown_B 				= D_Brown_A * D_rat;
+	v_A						= gamma_shear*D_Brown_A/kT;
 
 	// set values of remaining static variables
-	delta_t				= tau_B * timestep;
-	max_timesteps		= (int)(tau/timestep);
+	delta_t					= tau_B * timestep;
+	max_timesteps			= (int)(tau/timestep);
 
-	weigh_brown_A 		= sqrt(2.0 * D_Brown_A * delta_t);
-	weigh_brown_B 		= sqrt(2.0 * D_Brown_B * delta_t);
+	weigh_brown_A 			= sqrt(2.0 * D_Brown_A * delta_t);
+	weigh_brown_B 			= sqrt(2.0 * D_Brown_B * delta_t);
 
-	cutoff 				= (fmax(L_x, L_y)/2.0);
-	cutoff_squared 		= cutoff*cutoff;
-	d_cutoff_verlet 	= 0.16 * cutoff;	// equals 2.9/2.5-1, estimate for best runtime
+	cutoff 					= (fmax(L_x, L_y)/2.0);
+	cutoff_squared 			= cutoff*cutoff;
+	d_cutoff_verlet 		= 1.15 * cutoff;
+	d_cutoff_verlet_squared = d_cutoff_verlet*d_cutoff_verlet;
 
 	// compute the force at cutoff value, this force will be deducted from the system
 	force_cutoff	= 3*Gamma_A/(cutoff_squared*cutoff_squared);
@@ -297,6 +299,8 @@ static void *iteration_0 (int *no) {
 	int iterate;
 	int j;
 
+	int cut;
+
 	double m_i_A = 1.0;
 	double m_i_B = m;
 
@@ -311,36 +315,34 @@ static void *iteration_0 (int *no) {
 	double dist_top;
 
 	// cutoff for the walls force, this will lead to a smoother transition
-	double dist_cutoff 			= 1.0;
 	double prefactor			= 3.0;
-	double force_wall_cutoff 	= 1.0*prefactor *(kappa/dist_cutoff + 1.0/(dist_cutoff*dist_cutoff))*exp(-kappa*dist_cutoff);
 
 	while(cont == 1) {
-			xi = position[2*0];
-			yi = position[2*0+1];
+		xi = position[2*0];
+		yi = position[2*0+1];
 
-			force[2*0]	 = 0;
-			force[2*0+1] = 0;
+		force[2*0]	 = 0;
+		force[2*0+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*0+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*0+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*0+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*0+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*0+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*0+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*0+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*0+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(0+1)-1];
+		iterate = verlet[N*(0+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -356,37 +358,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*0] 		+= temp_force*dx;
 			force[2*0+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*1];
-			yi = position[2*1+1];
+		xi = position[2*1];
+		yi = position[2*1+1];
 
-			force[2*1]	 = 0;
-			force[2*1+1] = 0;
+		force[2*1]	 = 0;
+		force[2*1+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*1+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*1+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*1+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*1+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*1+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*1+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*1+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*1+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(1+1)-1];
+		iterate = verlet[N*(1+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -402,37 +406,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*1] 		+= temp_force*dx;
 			force[2*1+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*2];
-			yi = position[2*2+1];
+		xi = position[2*2];
+		yi = position[2*2+1];
 
-			force[2*2]	 = 0;
-			force[2*2+1] = 0;
+		force[2*2]	 = 0;
+		force[2*2+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*2+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*2+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*2+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*2+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*2+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*2+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*2+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*2+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(2+1)-1];
+		iterate = verlet[N*(2+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -448,37 +454,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*2] 		+= temp_force*dx;
 			force[2*2+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*3];
-			yi = position[2*3+1];
+		xi = position[2*3];
+		yi = position[2*3+1];
 
-			force[2*3]	 = 0;
-			force[2*3+1] = 0;
+		force[2*3]	 = 0;
+		force[2*3+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*3+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*3+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*3+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*3+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*3+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*3+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*3+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*3+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(3+1)-1];
+		iterate = verlet[N*(3+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -494,37 +502,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*3] 		+= temp_force*dx;
 			force[2*3+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*4];
-			yi = position[2*4+1];
+		xi = position[2*4];
+		yi = position[2*4+1];
 
-			force[2*4]	 = 0;
-			force[2*4+1] = 0;
+		force[2*4]	 = 0;
+		force[2*4+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*4+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*4+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*4+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*4+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*4+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*4+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*4+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*4+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(4+1)-1];
+		iterate = verlet[N*(4+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -540,37 +550,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*4] 		+= temp_force*dx;
 			force[2*4+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*5];
-			yi = position[2*5+1];
+		xi = position[2*5];
+		yi = position[2*5+1];
 
-			force[2*5]	 = 0;
-			force[2*5+1] = 0;
+		force[2*5]	 = 0;
+		force[2*5+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*5+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*5+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*5+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*5+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*5+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*5+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*5+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*5+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(5+1)-1];
+		iterate = verlet[N*(5+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -586,37 +598,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*5] 		+= temp_force*dx;
 			force[2*5+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*6];
-			yi = position[2*6+1];
+		xi = position[2*6];
+		yi = position[2*6+1];
 
-			force[2*6]	 = 0;
-			force[2*6+1] = 0;
+		force[2*6]	 = 0;
+		force[2*6+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*6+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*6+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*6+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*6+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*6+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*6+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*6+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*6+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(6+1)-1];
+		iterate = verlet[N*(6+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -632,37 +646,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*6] 		+= temp_force*dx;
 			force[2*6+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*7];
-			yi = position[2*7+1];
+		xi = position[2*7];
+		yi = position[2*7+1];
 
-			force[2*7]	 = 0;
-			force[2*7+1] = 0;
+		force[2*7]	 = 0;
+		force[2*7+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*7+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*7+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*7+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*7+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*7+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*7+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*7+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*7+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(7+1)-1];
+		iterate = verlet[N*(7+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -678,37 +694,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*7] 		+= temp_force*dx;
 			force[2*7+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*8];
-			yi = position[2*8+1];
+		xi = position[2*8];
+		yi = position[2*8+1];
 
-			force[2*8]	 = 0;
-			force[2*8+1] = 0;
+		force[2*8]	 = 0;
+		force[2*8+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*8+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*8+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*8+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*8+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*8+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*8+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*8+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*8+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(8+1)-1];
+		iterate = verlet[N*(8+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -724,37 +742,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*8] 		+= temp_force*dx;
 			force[2*8+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*9];
-			yi = position[2*9+1];
+		xi = position[2*9];
+		yi = position[2*9+1];
 
-			force[2*9]	 = 0;
-			force[2*9+1] = 0;
+		force[2*9]	 = 0;
+		force[2*9+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*9+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*9+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*9+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*9+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*9+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*9+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*9+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*9+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(9+1)-1];
+		iterate = verlet[N*(9+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -770,37 +790,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*9] 		+= temp_force*dx;
 			force[2*9+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*10];
-			yi = position[2*10+1];
+		xi = position[2*10];
+		yi = position[2*10+1];
 
-			force[2*10]	 = 0;
-			force[2*10+1] = 0;
+		force[2*10]	 = 0;
+		force[2*10+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*10+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*10+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*10+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*10+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*10+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*10+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*10+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*10+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(10+1)-1];
+		iterate = verlet[N*(10+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -816,37 +838,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*10] 		+= temp_force*dx;
 			force[2*10+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*11];
-			yi = position[2*11+1];
+		xi = position[2*11];
+		yi = position[2*11+1];
 
-			force[2*11]	 = 0;
-			force[2*11+1] = 0;
+		force[2*11]	 = 0;
+		force[2*11+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*11+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*11+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*11+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*11+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*11+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*11+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*11+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*11+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(11+1)-1];
+		iterate = verlet[N*(11+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -862,37 +886,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*11] 		+= temp_force*dx;
 			force[2*11+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*12];
-			yi = position[2*12+1];
+		xi = position[2*12];
+		yi = position[2*12+1];
 
-			force[2*12]	 = 0;
-			force[2*12+1] = 0;
+		force[2*12]	 = 0;
+		force[2*12+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*12+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*12+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*12+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*12+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*12+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*12+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*12+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*12+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(12+1)-1];
+		iterate = verlet[N*(12+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -908,37 +934,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*12] 		+= temp_force*dx;
 			force[2*12+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*13];
-			yi = position[2*13+1];
+		xi = position[2*13];
+		yi = position[2*13+1];
 
-			force[2*13]	 = 0;
-			force[2*13+1] = 0;
+		force[2*13]	 = 0;
+		force[2*13+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*13+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*13+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*13+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*13+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*13+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*13+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*13+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*13+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(13+1)-1];
+		iterate = verlet[N*(13+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -954,37 +982,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*13] 		+= temp_force*dx;
 			force[2*13+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*14];
-			yi = position[2*14+1];
+		xi = position[2*14];
+		yi = position[2*14+1];
 
-			force[2*14]	 = 0;
-			force[2*14+1] = 0;
+		force[2*14]	 = 0;
+		force[2*14+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*14+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*14+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*14+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*14+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*14+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*14+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*14+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*14+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(14+1)-1];
+		iterate = verlet[N*(14+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1000,37 +1030,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*14] 		+= temp_force*dx;
 			force[2*14+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*15];
-			yi = position[2*15+1];
+		xi = position[2*15];
+		yi = position[2*15+1];
 
-			force[2*15]	 = 0;
-			force[2*15+1] = 0;
+		force[2*15]	 = 0;
+		force[2*15+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*15+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*15+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*15+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*15+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*15+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*15+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*15+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*15+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(15+1)-1];
+		iterate = verlet[N*(15+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1046,37 +1078,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*15] 		+= temp_force*dx;
 			force[2*15+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*16];
-			yi = position[2*16+1];
+		xi = position[2*16];
+		yi = position[2*16+1];
 
-			force[2*16]	 = 0;
-			force[2*16+1] = 0;
+		force[2*16]	 = 0;
+		force[2*16+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*16+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*16+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*16+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*16+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*16+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*16+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*16+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*16+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(16+1)-1];
+		iterate = verlet[N*(16+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1092,37 +1126,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*16] 		+= temp_force*dx;
 			force[2*16+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*17];
-			yi = position[2*17+1];
+		xi = position[2*17];
+		yi = position[2*17+1];
 
-			force[2*17]	 = 0;
-			force[2*17+1] = 0;
+		force[2*17]	 = 0;
+		force[2*17+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*17+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*17+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*17+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*17+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*17+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*17+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*17+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*17+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(17+1)-1];
+		iterate = verlet[N*(17+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1138,37 +1174,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*17] 		+= temp_force*dx;
 			force[2*17+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*18];
-			yi = position[2*18+1];
+		xi = position[2*18];
+		yi = position[2*18+1];
 
-			force[2*18]	 = 0;
-			force[2*18+1] = 0;
+		force[2*18]	 = 0;
+		force[2*18+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*18+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*18+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*18+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*18+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*18+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*18+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*18+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*18+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(18+1)-1];
+		iterate = verlet[N*(18+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1184,37 +1222,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*18] 		+= temp_force*dx;
 			force[2*18+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*19];
-			yi = position[2*19+1];
+		xi = position[2*19];
+		yi = position[2*19+1];
 
-			force[2*19]	 = 0;
-			force[2*19+1] = 0;
+		force[2*19]	 = 0;
+		force[2*19+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*19+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*19+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*19+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*19+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*19+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*19+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*19+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*19+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(19+1)-1];
+		iterate = verlet[N*(19+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1230,37 +1270,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*19] 		+= temp_force*dx;
 			force[2*19+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*20];
-			yi = position[2*20+1];
+		xi = position[2*20];
+		yi = position[2*20+1];
 
-			force[2*20]	 = 0;
-			force[2*20+1] = 0;
+		force[2*20]	 = 0;
+		force[2*20+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*20+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*20+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*20+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*20+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*20+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*20+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*20+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*20+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(20+1)-1];
+		iterate = verlet[N*(20+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1276,37 +1318,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*20] 		+= temp_force*dx;
 			force[2*20+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*21];
-			yi = position[2*21+1];
+		xi = position[2*21];
+		yi = position[2*21+1];
 
-			force[2*21]	 = 0;
-			force[2*21+1] = 0;
+		force[2*21]	 = 0;
+		force[2*21+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*21+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*21+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*21+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*21+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*21+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*21+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*21+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*21+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(21+1)-1];
+		iterate = verlet[N*(21+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1322,37 +1366,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*21] 		+= temp_force*dx;
 			force[2*21+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*22];
-			yi = position[2*22+1];
+		xi = position[2*22];
+		yi = position[2*22+1];
 
-			force[2*22]	 = 0;
-			force[2*22+1] = 0;
+		force[2*22]	 = 0;
+		force[2*22+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*22+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*22+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*22+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*22+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*22+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*22+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*22+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*22+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(22+1)-1];
+		iterate = verlet[N*(22+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1368,37 +1414,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*22] 		+= temp_force*dx;
 			force[2*22+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*23];
-			yi = position[2*23+1];
+		xi = position[2*23];
+		yi = position[2*23+1];
 
-			force[2*23]	 = 0;
-			force[2*23+1] = 0;
+		force[2*23]	 = 0;
+		force[2*23+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*23+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*23+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*23+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*23+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*23+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*23+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*23+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*23+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(23+1)-1];
+		iterate = verlet[N*(23+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1414,37 +1462,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*23] 		+= temp_force*dx;
 			force[2*23+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*24];
-			yi = position[2*24+1];
+		xi = position[2*24];
+		yi = position[2*24+1];
 
-			force[2*24]	 = 0;
-			force[2*24+1] = 0;
+		force[2*24]	 = 0;
+		force[2*24+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*24+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*24+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*24+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*24+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*24+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*24+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*24+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*24+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(24+1)-1];
+		iterate = verlet[N*(24+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1460,37 +1510,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*24] 		+= temp_force*dx;
 			force[2*24+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*25];
-			yi = position[2*25+1];
+		xi = position[2*25];
+		yi = position[2*25+1];
 
-			force[2*25]	 = 0;
-			force[2*25+1] = 0;
+		force[2*25]	 = 0;
+		force[2*25+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*25+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*25+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*25+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*25+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*25+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*25+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*25+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*25+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(25+1)-1];
+		iterate = verlet[N*(25+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1506,37 +1558,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*25] 		+= temp_force*dx;
 			force[2*25+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*26];
-			yi = position[2*26+1];
+		xi = position[2*26];
+		yi = position[2*26+1];
 
-			force[2*26]	 = 0;
-			force[2*26+1] = 0;
+		force[2*26]	 = 0;
+		force[2*26+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*26+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*26+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*26+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*26+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*26+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*26+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*26+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*26+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(26+1)-1];
+		iterate = verlet[N*(26+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1552,37 +1606,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*26] 		+= temp_force*dx;
 			force[2*26+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*27];
-			yi = position[2*27+1];
+		xi = position[2*27];
+		yi = position[2*27+1];
 
-			force[2*27]	 = 0;
-			force[2*27+1] = 0;
+		force[2*27]	 = 0;
+		force[2*27+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*27+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*27+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*27+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*27+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*27+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*27+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*27+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*27+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(27+1)-1];
+		iterate = verlet[N*(27+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1598,37 +1654,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*27] 		+= temp_force*dx;
 			force[2*27+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*28];
-			yi = position[2*28+1];
+		xi = position[2*28];
+		yi = position[2*28+1];
 
-			force[2*28]	 = 0;
-			force[2*28+1] = 0;
+		force[2*28]	 = 0;
+		force[2*28+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*28+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*28+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*28+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*28+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*28+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*28+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*28+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*28+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(28+1)-1];
+		iterate = verlet[N*(28+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1644,37 +1702,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*28] 		+= temp_force*dx;
 			force[2*28+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*29];
-			yi = position[2*29+1];
+		xi = position[2*29];
+		yi = position[2*29+1];
 
-			force[2*29]	 = 0;
-			force[2*29+1] = 0;
+		force[2*29]	 = 0;
+		force[2*29+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*29+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*29+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*29+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*29+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*29+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*29+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*29+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*29+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(29+1)-1];
+		iterate = verlet[N*(29+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1690,37 +1750,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*29] 		+= temp_force*dx;
 			force[2*29+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*30];
-			yi = position[2*30+1];
+		xi = position[2*30];
+		yi = position[2*30+1];
 
-			force[2*30]	 = 0;
-			force[2*30+1] = 0;
+		force[2*30]	 = 0;
+		force[2*30+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*30+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*30+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*30+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*30+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*30+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*30+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*30+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*30+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(30+1)-1];
+		iterate = verlet[N*(30+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1736,37 +1798,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*30] 		+= temp_force*dx;
 			force[2*30+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*31];
-			yi = position[2*31+1];
+		xi = position[2*31];
+		yi = position[2*31+1];
 
-			force[2*31]	 = 0;
-			force[2*31+1] = 0;
+		force[2*31]	 = 0;
+		force[2*31+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*31+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*31+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*31+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*31+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*31+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*31+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*31+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*31+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(31+1)-1];
+		iterate = verlet[N*(31+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1782,37 +1846,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*31] 		+= temp_force*dx;
 			force[2*31+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*32];
-			yi = position[2*32+1];
+		xi = position[2*32];
+		yi = position[2*32+1];
 
-			force[2*32]	 = 0;
-			force[2*32+1] = 0;
+		force[2*32]	 = 0;
+		force[2*32+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*32+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*32+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*32+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*32+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*32+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*32+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*32+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*32+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(32+1)-1];
+		iterate = verlet[N*(32+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1828,37 +1894,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*32] 		+= temp_force*dx;
 			force[2*32+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*33];
-			yi = position[2*33+1];
+		xi = position[2*33];
+		yi = position[2*33+1];
 
-			force[2*33]	 = 0;
-			force[2*33+1] = 0;
+		force[2*33]	 = 0;
+		force[2*33+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*33+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*33+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*33+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*33+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*33+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*33+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*33+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*33+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(33+1)-1];
+		iterate = verlet[N*(33+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1874,37 +1942,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*33] 		+= temp_force*dx;
 			force[2*33+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*34];
-			yi = position[2*34+1];
+		xi = position[2*34];
+		yi = position[2*34+1];
 
-			force[2*34]	 = 0;
-			force[2*34+1] = 0;
+		force[2*34]	 = 0;
+		force[2*34+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*34+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*34+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*34+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*34+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*34+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*34+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*34+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*34+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(34+1)-1];
+		iterate = verlet[N*(34+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1920,37 +1990,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*34] 		+= temp_force*dx;
 			force[2*34+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*35];
-			yi = position[2*35+1];
+		xi = position[2*35];
+		yi = position[2*35+1];
 
-			force[2*35]	 = 0;
-			force[2*35+1] = 0;
+		force[2*35]	 = 0;
+		force[2*35+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*35+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*35+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*35+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*35+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*35+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*35+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*35+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*35+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(35+1)-1];
+		iterate = verlet[N*(35+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -1966,37 +2038,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*35] 		+= temp_force*dx;
 			force[2*35+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*36];
-			yi = position[2*36+1];
+		xi = position[2*36];
+		yi = position[2*36+1];
 
-			force[2*36]	 = 0;
-			force[2*36+1] = 0;
+		force[2*36]	 = 0;
+		force[2*36+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*36+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*36+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*36+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*36+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*36+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*36+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*36+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*36+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(36+1)-1];
+		iterate = verlet[N*(36+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -2012,37 +2086,39 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*36] 		+= temp_force*dx;
 			force[2*36+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*37];
-			yi = position[2*37+1];
+		xi = position[2*37];
+		yi = position[2*37+1];
 
-			force[2*37]	 = 0;
-			force[2*37+1] = 0;
+		force[2*37]	 = 0;
+		force[2*37+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*37+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*37+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*37+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*37+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*37+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*37+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*37+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*37+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(37+1)-1];
+		iterate = verlet[N*(37+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -2058,7 +2134,9 @@ static void *iteration_0 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*37] 		+= temp_force*dx;
 			force[2*37+1]	+= temp_force*dy;
@@ -3422,6 +3500,8 @@ static void *iteration_1 (int *no) {
 	int iterate;
 	int j;
 
+	int cut;
+
 	double m_i_A = 1.0;
 	double m_i_B = m;
 
@@ -3436,36 +3516,34 @@ static void *iteration_1 (int *no) {
 	double dist_top;
 
 	// cutoff for the walls force, this will lead to a smoother transition
-	double dist_cutoff 			= 1.0;
 	double prefactor			= 3.0;
-	double force_wall_cutoff 	= 1.0*prefactor *(kappa/dist_cutoff + 1.0/(dist_cutoff*dist_cutoff))*exp(-kappa*dist_cutoff);
 
 	while(cont == 1) {
-			xi = position[2*38];
-			yi = position[2*38+1];
+		xi = position[2*38];
+		yi = position[2*38+1];
 
-			force[2*38]	 = 0;
-			force[2*38+1] = 0;
+		force[2*38]	 = 0;
+		force[2*38+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*38+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*38+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*38+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*38+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*38+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*38+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*38+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*38+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(38+1)-1];
+		iterate = verlet[N*(38+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -3481,37 +3559,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*38] 		+= temp_force*dx;
 			force[2*38+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*39];
-			yi = position[2*39+1];
+		xi = position[2*39];
+		yi = position[2*39+1];
 
-			force[2*39]	 = 0;
-			force[2*39+1] = 0;
+		force[2*39]	 = 0;
+		force[2*39+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*39+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*39+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*39+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*39+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*39+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*39+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*39+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*39+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(39+1)-1];
+		iterate = verlet[N*(39+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -3527,37 +3607,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*39] 		+= temp_force*dx;
 			force[2*39+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*40];
-			yi = position[2*40+1];
+		xi = position[2*40];
+		yi = position[2*40+1];
 
-			force[2*40]	 = 0;
-			force[2*40+1] = 0;
+		force[2*40]	 = 0;
+		force[2*40+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*40+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*40+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*40+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*40+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*40+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*40+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*40+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*40+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(40+1)-1];
+		iterate = verlet[N*(40+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -3573,37 +3655,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*40] 		+= temp_force*dx;
 			force[2*40+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*41];
-			yi = position[2*41+1];
+		xi = position[2*41];
+		yi = position[2*41+1];
 
-			force[2*41]	 = 0;
-			force[2*41+1] = 0;
+		force[2*41]	 = 0;
+		force[2*41+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*41+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*41+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*41+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*41+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*41+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*41+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*41+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*41+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(41+1)-1];
+		iterate = verlet[N*(41+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -3619,37 +3703,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*41] 		+= temp_force*dx;
 			force[2*41+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*42];
-			yi = position[2*42+1];
+		xi = position[2*42];
+		yi = position[2*42+1];
 
-			force[2*42]	 = 0;
-			force[2*42+1] = 0;
+		force[2*42]	 = 0;
+		force[2*42+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*42+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*42+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*42+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*42+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*42+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*42+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*42+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*42+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(42+1)-1];
+		iterate = verlet[N*(42+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -3665,37 +3751,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*42] 		+= temp_force*dx;
 			force[2*42+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*43];
-			yi = position[2*43+1];
+		xi = position[2*43];
+		yi = position[2*43+1];
 
-			force[2*43]	 = 0;
-			force[2*43+1] = 0;
+		force[2*43]	 = 0;
+		force[2*43+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*43+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*43+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*43+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*43+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*43+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*43+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*43+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*43+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(43+1)-1];
+		iterate = verlet[N*(43+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -3711,37 +3799,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*43] 		+= temp_force*dx;
 			force[2*43+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*44];
-			yi = position[2*44+1];
+		xi = position[2*44];
+		yi = position[2*44+1];
 
-			force[2*44]	 = 0;
-			force[2*44+1] = 0;
+		force[2*44]	 = 0;
+		force[2*44+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*44+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*44+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*44+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*44+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*44+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*44+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*44+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*44+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(44+1)-1];
+		iterate = verlet[N*(44+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -3757,37 +3847,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*44] 		+= temp_force*dx;
 			force[2*44+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*45];
-			yi = position[2*45+1];
+		xi = position[2*45];
+		yi = position[2*45+1];
 
-			force[2*45]	 = 0;
-			force[2*45+1] = 0;
+		force[2*45]	 = 0;
+		force[2*45+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*45+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*45+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*45+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*45+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*45+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*45+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*45+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*45+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(45+1)-1];
+		iterate = verlet[N*(45+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -3803,37 +3895,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*45] 		+= temp_force*dx;
 			force[2*45+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*46];
-			yi = position[2*46+1];
+		xi = position[2*46];
+		yi = position[2*46+1];
 
-			force[2*46]	 = 0;
-			force[2*46+1] = 0;
+		force[2*46]	 = 0;
+		force[2*46+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*46+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*46+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*46+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*46+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*46+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*46+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*46+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*46+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(46+1)-1];
+		iterate = verlet[N*(46+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -3849,37 +3943,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*46] 		+= temp_force*dx;
 			force[2*46+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*47];
-			yi = position[2*47+1];
+		xi = position[2*47];
+		yi = position[2*47+1];
 
-			force[2*47]	 = 0;
-			force[2*47+1] = 0;
+		force[2*47]	 = 0;
+		force[2*47+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*47+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*47+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*47+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*47+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*47+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*47+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*47+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*47+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(47+1)-1];
+		iterate = verlet[N*(47+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -3895,37 +3991,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*47] 		+= temp_force*dx;
 			force[2*47+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*48];
-			yi = position[2*48+1];
+		xi = position[2*48];
+		yi = position[2*48+1];
 
-			force[2*48]	 = 0;
-			force[2*48+1] = 0;
+		force[2*48]	 = 0;
+		force[2*48+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*48+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*48+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*48+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*48+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*48+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*48+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*48+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*48+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(48+1)-1];
+		iterate = verlet[N*(48+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -3941,37 +4039,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*48] 		+= temp_force*dx;
 			force[2*48+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*49];
-			yi = position[2*49+1];
+		xi = position[2*49];
+		yi = position[2*49+1];
 
-			force[2*49]	 = 0;
-			force[2*49+1] = 0;
+		force[2*49]	 = 0;
+		force[2*49+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*49+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*49+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*49+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*49+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*49+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*49+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*49+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*49+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(49+1)-1];
+		iterate = verlet[N*(49+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -3987,37 +4087,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*49] 		+= temp_force*dx;
 			force[2*49+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*50];
-			yi = position[2*50+1];
+		xi = position[2*50];
+		yi = position[2*50+1];
 
-			force[2*50]	 = 0;
-			force[2*50+1] = 0;
+		force[2*50]	 = 0;
+		force[2*50+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*50+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*50+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*50+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*50+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*50+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*50+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*50+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*50+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(50+1)-1];
+		iterate = verlet[N*(50+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4033,37 +4135,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*50] 		+= temp_force*dx;
 			force[2*50+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*51];
-			yi = position[2*51+1];
+		xi = position[2*51];
+		yi = position[2*51+1];
 
-			force[2*51]	 = 0;
-			force[2*51+1] = 0;
+		force[2*51]	 = 0;
+		force[2*51+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*51+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*51+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*51+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*51+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*51+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*51+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*51+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*51+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(51+1)-1];
+		iterate = verlet[N*(51+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4079,37 +4183,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*51] 		+= temp_force*dx;
 			force[2*51+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*52];
-			yi = position[2*52+1];
+		xi = position[2*52];
+		yi = position[2*52+1];
 
-			force[2*52]	 = 0;
-			force[2*52+1] = 0;
+		force[2*52]	 = 0;
+		force[2*52+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*52+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*52+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*52+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*52+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*52+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*52+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*52+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*52+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(52+1)-1];
+		iterate = verlet[N*(52+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4125,37 +4231,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*52] 		+= temp_force*dx;
 			force[2*52+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*53];
-			yi = position[2*53+1];
+		xi = position[2*53];
+		yi = position[2*53+1];
 
-			force[2*53]	 = 0;
-			force[2*53+1] = 0;
+		force[2*53]	 = 0;
+		force[2*53+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*53+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*53+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*53+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*53+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*53+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*53+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*53+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*53+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(53+1)-1];
+		iterate = verlet[N*(53+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4171,37 +4279,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*53] 		+= temp_force*dx;
 			force[2*53+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*54];
-			yi = position[2*54+1];
+		xi = position[2*54];
+		yi = position[2*54+1];
 
-			force[2*54]	 = 0;
-			force[2*54+1] = 0;
+		force[2*54]	 = 0;
+		force[2*54+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*54+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*54+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*54+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*54+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*54+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*54+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*54+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*54+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(54+1)-1];
+		iterate = verlet[N*(54+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4217,37 +4327,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*54] 		+= temp_force*dx;
 			force[2*54+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*55];
-			yi = position[2*55+1];
+		xi = position[2*55];
+		yi = position[2*55+1];
 
-			force[2*55]	 = 0;
-			force[2*55+1] = 0;
+		force[2*55]	 = 0;
+		force[2*55+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*55+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*55+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*55+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*55+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*55+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*55+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*55+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*55+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(55+1)-1];
+		iterate = verlet[N*(55+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4263,37 +4375,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*55] 		+= temp_force*dx;
 			force[2*55+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*56];
-			yi = position[2*56+1];
+		xi = position[2*56];
+		yi = position[2*56+1];
 
-			force[2*56]	 = 0;
-			force[2*56+1] = 0;
+		force[2*56]	 = 0;
+		force[2*56+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*56+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*56+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*56+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*56+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*56+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*56+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*56+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*56+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(56+1)-1];
+		iterate = verlet[N*(56+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4309,37 +4423,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*56] 		+= temp_force*dx;
 			force[2*56+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*57];
-			yi = position[2*57+1];
+		xi = position[2*57];
+		yi = position[2*57+1];
 
-			force[2*57]	 = 0;
-			force[2*57+1] = 0;
+		force[2*57]	 = 0;
+		force[2*57+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*57+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*57+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*57+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*57+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*57+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*57+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*57+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*57+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(57+1)-1];
+		iterate = verlet[N*(57+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4355,37 +4471,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*57] 		+= temp_force*dx;
 			force[2*57+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*58];
-			yi = position[2*58+1];
+		xi = position[2*58];
+		yi = position[2*58+1];
 
-			force[2*58]	 = 0;
-			force[2*58+1] = 0;
+		force[2*58]	 = 0;
+		force[2*58+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*58+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*58+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*58+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*58+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*58+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*58+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*58+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*58+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(58+1)-1];
+		iterate = verlet[N*(58+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4401,37 +4519,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*58] 		+= temp_force*dx;
 			force[2*58+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*59];
-			yi = position[2*59+1];
+		xi = position[2*59];
+		yi = position[2*59+1];
 
-			force[2*59]	 = 0;
-			force[2*59+1] = 0;
+		force[2*59]	 = 0;
+		force[2*59+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*59+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*59+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*59+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*59+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*59+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*59+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*59+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*59+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(59+1)-1];
+		iterate = verlet[N*(59+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4447,37 +4567,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*59] 		+= temp_force*dx;
 			force[2*59+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*60];
-			yi = position[2*60+1];
+		xi = position[2*60];
+		yi = position[2*60+1];
 
-			force[2*60]	 = 0;
-			force[2*60+1] = 0;
+		force[2*60]	 = 0;
+		force[2*60+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*60+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*60+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*60+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*60+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*60+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*60+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*60+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*60+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(60+1)-1];
+		iterate = verlet[N*(60+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4493,37 +4615,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*60] 		+= temp_force*dx;
 			force[2*60+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*61];
-			yi = position[2*61+1];
+		xi = position[2*61];
+		yi = position[2*61+1];
 
-			force[2*61]	 = 0;
-			force[2*61+1] = 0;
+		force[2*61]	 = 0;
+		force[2*61+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*61+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*61+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*61+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*61+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*61+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*61+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*61+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*61+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(61+1)-1];
+		iterate = verlet[N*(61+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4539,37 +4663,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*61] 		+= temp_force*dx;
 			force[2*61+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*62];
-			yi = position[2*62+1];
+		xi = position[2*62];
+		yi = position[2*62+1];
 
-			force[2*62]	 = 0;
-			force[2*62+1] = 0;
+		force[2*62]	 = 0;
+		force[2*62+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*62+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*62+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*62+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*62+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*62+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*62+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*62+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*62+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(62+1)-1];
+		iterate = verlet[N*(62+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4585,37 +4711,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*62] 		+= temp_force*dx;
 			force[2*62+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*63];
-			yi = position[2*63+1];
+		xi = position[2*63];
+		yi = position[2*63+1];
 
-			force[2*63]	 = 0;
-			force[2*63+1] = 0;
+		force[2*63]	 = 0;
+		force[2*63+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*63+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*63+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*63+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*63+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*63+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*63+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*63+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*63+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(63+1)-1];
+		iterate = verlet[N*(63+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4631,37 +4759,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*63] 		+= temp_force*dx;
 			force[2*63+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*64];
-			yi = position[2*64+1];
+		xi = position[2*64];
+		yi = position[2*64+1];
 
-			force[2*64]	 = 0;
-			force[2*64+1] = 0;
+		force[2*64]	 = 0;
+		force[2*64+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*64+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*64+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*64+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*64+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*64+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*64+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*64+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*64+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(64+1)-1];
+		iterate = verlet[N*(64+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4677,37 +4807,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*64] 		+= temp_force*dx;
 			force[2*64+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*65];
-			yi = position[2*65+1];
+		xi = position[2*65];
+		yi = position[2*65+1];
 
-			force[2*65]	 = 0;
-			force[2*65+1] = 0;
+		force[2*65]	 = 0;
+		force[2*65+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*65+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*65+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*65+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*65+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*65+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*65+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*65+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*65+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(65+1)-1];
+		iterate = verlet[N*(65+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4723,37 +4855,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*65] 		+= temp_force*dx;
 			force[2*65+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*66];
-			yi = position[2*66+1];
+		xi = position[2*66];
+		yi = position[2*66+1];
 
-			force[2*66]	 = 0;
-			force[2*66+1] = 0;
+		force[2*66]	 = 0;
+		force[2*66+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*66+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*66+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*66+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*66+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*66+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*66+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*66+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*66+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(66+1)-1];
+		iterate = verlet[N*(66+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4769,37 +4903,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*66] 		+= temp_force*dx;
 			force[2*66+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*67];
-			yi = position[2*67+1];
+		xi = position[2*67];
+		yi = position[2*67+1];
 
-			force[2*67]	 = 0;
-			force[2*67+1] = 0;
+		force[2*67]	 = 0;
+		force[2*67+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*67+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*67+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*67+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*67+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*67+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*67+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*67+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*67+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(67+1)-1];
+		iterate = verlet[N*(67+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4815,37 +4951,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*67] 		+= temp_force*dx;
 			force[2*67+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*68];
-			yi = position[2*68+1];
+		xi = position[2*68];
+		yi = position[2*68+1];
 
-			force[2*68]	 = 0;
-			force[2*68+1] = 0;
+		force[2*68]	 = 0;
+		force[2*68+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*68+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*68+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*68+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*68+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*68+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*68+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*68+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*68+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(68+1)-1];
+		iterate = verlet[N*(68+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4861,37 +4999,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*68] 		+= temp_force*dx;
 			force[2*68+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*69];
-			yi = position[2*69+1];
+		xi = position[2*69];
+		yi = position[2*69+1];
 
-			force[2*69]	 = 0;
-			force[2*69+1] = 0;
+		force[2*69]	 = 0;
+		force[2*69+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*69+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*69+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*69+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*69+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*69+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*69+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*69+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*69+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(69+1)-1];
+		iterate = verlet[N*(69+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4907,37 +5047,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*69] 		+= temp_force*dx;
 			force[2*69+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*70];
-			yi = position[2*70+1];
+		xi = position[2*70];
+		yi = position[2*70+1];
 
-			force[2*70]	 = 0;
-			force[2*70+1] = 0;
+		force[2*70]	 = 0;
+		force[2*70+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*70+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*70+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*70+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*70+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*70+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*70+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*70+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*70+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(70+1)-1];
+		iterate = verlet[N*(70+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4953,37 +5095,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*70] 		+= temp_force*dx;
 			force[2*70+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*71];
-			yi = position[2*71+1];
+		xi = position[2*71];
+		yi = position[2*71+1];
 
-			force[2*71]	 = 0;
-			force[2*71+1] = 0;
+		force[2*71]	 = 0;
+		force[2*71+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*71+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*71+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*71+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*71+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*71+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*71+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*71+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*71+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(71+1)-1];
+		iterate = verlet[N*(71+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -4999,37 +5143,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*71] 		+= temp_force*dx;
 			force[2*71+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*72];
-			yi = position[2*72+1];
+		xi = position[2*72];
+		yi = position[2*72+1];
 
-			force[2*72]	 = 0;
-			force[2*72+1] = 0;
+		force[2*72]	 = 0;
+		force[2*72+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*72+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*72+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*72+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*72+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*72+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*72+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*72+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*72+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(72+1)-1];
+		iterate = verlet[N*(72+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -5045,37 +5191,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*72] 		+= temp_force*dx;
 			force[2*72+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*73];
-			yi = position[2*73+1];
+		xi = position[2*73];
+		yi = position[2*73+1];
 
-			force[2*73]	 = 0;
-			force[2*73+1] = 0;
+		force[2*73]	 = 0;
+		force[2*73+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*73+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*73+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*73+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*73+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*73+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*73+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*73+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*73+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(73+1)-1];
+		iterate = verlet[N*(73+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -5091,37 +5239,39 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*73] 		+= temp_force*dx;
 			force[2*73+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*74];
-			yi = position[2*74+1];
+		xi = position[2*74];
+		yi = position[2*74+1];
 
-			force[2*74]	 = 0;
-			force[2*74+1] = 0;
+		force[2*74]	 = 0;
+		force[2*74+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*74+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*74+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*74+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*74+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*74+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*74+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*74+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*74+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(74+1)-1];
+		iterate = verlet[N*(74+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -5137,7 +5287,9 @@ static void *iteration_1 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*74] 		+= temp_force*dx;
 			force[2*74+1]	+= temp_force*dy;
@@ -6466,6 +6618,8 @@ static void *iteration_2 (int *no) {
 	int iterate;
 	int j;
 
+	int cut;
+
 	double m_i_A = 1.0;
 	double m_i_B = m;
 
@@ -6480,36 +6634,34 @@ static void *iteration_2 (int *no) {
 	double dist_top;
 
 	// cutoff for the walls force, this will lead to a smoother transition
-	double dist_cutoff 			= 1.0;
 	double prefactor			= 3.0;
-	double force_wall_cutoff 	= 1.0*prefactor *(kappa/dist_cutoff + 1.0/(dist_cutoff*dist_cutoff))*exp(-kappa*dist_cutoff);
 
 	while(cont == 1) {
-			xi = position[2*75];
-			yi = position[2*75+1];
+		xi = position[2*75];
+		yi = position[2*75+1];
 
-			force[2*75]	 = 0;
-			force[2*75+1] = 0;
+		force[2*75]	 = 0;
+		force[2*75+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*75+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*75+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*75+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*75+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*75+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*75+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*75+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*75+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(75+1)-1];
+		iterate = verlet[N*(75+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -6525,37 +6677,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*75] 		+= temp_force*dx;
 			force[2*75+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*76];
-			yi = position[2*76+1];
+		xi = position[2*76];
+		yi = position[2*76+1];
 
-			force[2*76]	 = 0;
-			force[2*76+1] = 0;
+		force[2*76]	 = 0;
+		force[2*76+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*76+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*76+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*76+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*76+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*76+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*76+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*76+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*76+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(76+1)-1];
+		iterate = verlet[N*(76+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -6571,37 +6725,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*76] 		+= temp_force*dx;
 			force[2*76+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*77];
-			yi = position[2*77+1];
+		xi = position[2*77];
+		yi = position[2*77+1];
 
-			force[2*77]	 = 0;
-			force[2*77+1] = 0;
+		force[2*77]	 = 0;
+		force[2*77+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*77+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*77+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*77+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*77+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*77+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*77+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*77+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*77+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(77+1)-1];
+		iterate = verlet[N*(77+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -6617,37 +6773,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*77] 		+= temp_force*dx;
 			force[2*77+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*78];
-			yi = position[2*78+1];
+		xi = position[2*78];
+		yi = position[2*78+1];
 
-			force[2*78]	 = 0;
-			force[2*78+1] = 0;
+		force[2*78]	 = 0;
+		force[2*78+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*78+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*78+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*78+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*78+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*78+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*78+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*78+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*78+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(78+1)-1];
+		iterate = verlet[N*(78+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -6663,37 +6821,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*78] 		+= temp_force*dx;
 			force[2*78+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*79];
-			yi = position[2*79+1];
+		xi = position[2*79];
+		yi = position[2*79+1];
 
-			force[2*79]	 = 0;
-			force[2*79+1] = 0;
+		force[2*79]	 = 0;
+		force[2*79+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*79+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*79+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*79+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*79+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*79+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*79+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*79+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*79+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(79+1)-1];
+		iterate = verlet[N*(79+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -6709,37 +6869,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*79] 		+= temp_force*dx;
 			force[2*79+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*80];
-			yi = position[2*80+1];
+		xi = position[2*80];
+		yi = position[2*80+1];
 
-			force[2*80]	 = 0;
-			force[2*80+1] = 0;
+		force[2*80]	 = 0;
+		force[2*80+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*80+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*80+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*80+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*80+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*80+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*80+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*80+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*80+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(80+1)-1];
+		iterate = verlet[N*(80+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -6755,37 +6917,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*80] 		+= temp_force*dx;
 			force[2*80+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*81];
-			yi = position[2*81+1];
+		xi = position[2*81];
+		yi = position[2*81+1];
 
-			force[2*81]	 = 0;
-			force[2*81+1] = 0;
+		force[2*81]	 = 0;
+		force[2*81+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*81+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*81+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*81+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*81+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*81+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*81+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*81+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*81+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(81+1)-1];
+		iterate = verlet[N*(81+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -6801,37 +6965,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*81] 		+= temp_force*dx;
 			force[2*81+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*82];
-			yi = position[2*82+1];
+		xi = position[2*82];
+		yi = position[2*82+1];
 
-			force[2*82]	 = 0;
-			force[2*82+1] = 0;
+		force[2*82]	 = 0;
+		force[2*82+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*82+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*82+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*82+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*82+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*82+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*82+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*82+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*82+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(82+1)-1];
+		iterate = verlet[N*(82+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -6847,37 +7013,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*82] 		+= temp_force*dx;
 			force[2*82+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*83];
-			yi = position[2*83+1];
+		xi = position[2*83];
+		yi = position[2*83+1];
 
-			force[2*83]	 = 0;
-			force[2*83+1] = 0;
+		force[2*83]	 = 0;
+		force[2*83+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*83+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*83+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*83+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*83+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*83+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*83+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*83+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*83+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(83+1)-1];
+		iterate = verlet[N*(83+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -6893,37 +7061,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*83] 		+= temp_force*dx;
 			force[2*83+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*84];
-			yi = position[2*84+1];
+		xi = position[2*84];
+		yi = position[2*84+1];
 
-			force[2*84]	 = 0;
-			force[2*84+1] = 0;
+		force[2*84]	 = 0;
+		force[2*84+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*84+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*84+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*84+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*84+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*84+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*84+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*84+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*84+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(84+1)-1];
+		iterate = verlet[N*(84+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -6939,37 +7109,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*84] 		+= temp_force*dx;
 			force[2*84+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*85];
-			yi = position[2*85+1];
+		xi = position[2*85];
+		yi = position[2*85+1];
 
-			force[2*85]	 = 0;
-			force[2*85+1] = 0;
+		force[2*85]	 = 0;
+		force[2*85+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*85+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*85+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*85+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*85+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*85+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*85+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*85+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*85+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(85+1)-1];
+		iterate = verlet[N*(85+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -6985,37 +7157,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*85] 		+= temp_force*dx;
 			force[2*85+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*86];
-			yi = position[2*86+1];
+		xi = position[2*86];
+		yi = position[2*86+1];
 
-			force[2*86]	 = 0;
-			force[2*86+1] = 0;
+		force[2*86]	 = 0;
+		force[2*86+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*86+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*86+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*86+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*86+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*86+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*86+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*86+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*86+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(86+1)-1];
+		iterate = verlet[N*(86+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7031,37 +7205,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*86] 		+= temp_force*dx;
 			force[2*86+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*87];
-			yi = position[2*87+1];
+		xi = position[2*87];
+		yi = position[2*87+1];
 
-			force[2*87]	 = 0;
-			force[2*87+1] = 0;
+		force[2*87]	 = 0;
+		force[2*87+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*87+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*87+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*87+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*87+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*87+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*87+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*87+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*87+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(87+1)-1];
+		iterate = verlet[N*(87+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7077,37 +7253,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*87] 		+= temp_force*dx;
 			force[2*87+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*88];
-			yi = position[2*88+1];
+		xi = position[2*88];
+		yi = position[2*88+1];
 
-			force[2*88]	 = 0;
-			force[2*88+1] = 0;
+		force[2*88]	 = 0;
+		force[2*88+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*88+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*88+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*88+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*88+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*88+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*88+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*88+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*88+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(88+1)-1];
+		iterate = verlet[N*(88+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7123,37 +7301,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*88] 		+= temp_force*dx;
 			force[2*88+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*89];
-			yi = position[2*89+1];
+		xi = position[2*89];
+		yi = position[2*89+1];
 
-			force[2*89]	 = 0;
-			force[2*89+1] = 0;
+		force[2*89]	 = 0;
+		force[2*89+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*89+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*89+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*89+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*89+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*89+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*89+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*89+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*89+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(89+1)-1];
+		iterate = verlet[N*(89+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7169,37 +7349,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*89] 		+= temp_force*dx;
 			force[2*89+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*90];
-			yi = position[2*90+1];
+		xi = position[2*90];
+		yi = position[2*90+1];
 
-			force[2*90]	 = 0;
-			force[2*90+1] = 0;
+		force[2*90]	 = 0;
+		force[2*90+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*90+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*90+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*90+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*90+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*90+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*90+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*90+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*90+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(90+1)-1];
+		iterate = verlet[N*(90+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7215,37 +7397,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*90] 		+= temp_force*dx;
 			force[2*90+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*91];
-			yi = position[2*91+1];
+		xi = position[2*91];
+		yi = position[2*91+1];
 
-			force[2*91]	 = 0;
-			force[2*91+1] = 0;
+		force[2*91]	 = 0;
+		force[2*91+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*91+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*91+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*91+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*91+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*91+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*91+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*91+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*91+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(91+1)-1];
+		iterate = verlet[N*(91+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7261,37 +7445,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*91] 		+= temp_force*dx;
 			force[2*91+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*92];
-			yi = position[2*92+1];
+		xi = position[2*92];
+		yi = position[2*92+1];
 
-			force[2*92]	 = 0;
-			force[2*92+1] = 0;
+		force[2*92]	 = 0;
+		force[2*92+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*92+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*92+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*92+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*92+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*92+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*92+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*92+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*92+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(92+1)-1];
+		iterate = verlet[N*(92+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7307,37 +7493,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*92] 		+= temp_force*dx;
 			force[2*92+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*93];
-			yi = position[2*93+1];
+		xi = position[2*93];
+		yi = position[2*93+1];
 
-			force[2*93]	 = 0;
-			force[2*93+1] = 0;
+		force[2*93]	 = 0;
+		force[2*93+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*93+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*93+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*93+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*93+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*93+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*93+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*93+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*93+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(93+1)-1];
+		iterate = verlet[N*(93+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7353,37 +7541,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*93] 		+= temp_force*dx;
 			force[2*93+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*94];
-			yi = position[2*94+1];
+		xi = position[2*94];
+		yi = position[2*94+1];
 
-			force[2*94]	 = 0;
-			force[2*94+1] = 0;
+		force[2*94]	 = 0;
+		force[2*94+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*94+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*94+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*94+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*94+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*94+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*94+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*94+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*94+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(94+1)-1];
+		iterate = verlet[N*(94+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7399,37 +7589,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*94] 		+= temp_force*dx;
 			force[2*94+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*95];
-			yi = position[2*95+1];
+		xi = position[2*95];
+		yi = position[2*95+1];
 
-			force[2*95]	 = 0;
-			force[2*95+1] = 0;
+		force[2*95]	 = 0;
+		force[2*95+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*95+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*95+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*95+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*95+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*95+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*95+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*95+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*95+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(95+1)-1];
+		iterate = verlet[N*(95+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7445,37 +7637,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*95] 		+= temp_force*dx;
 			force[2*95+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*96];
-			yi = position[2*96+1];
+		xi = position[2*96];
+		yi = position[2*96+1];
 
-			force[2*96]	 = 0;
-			force[2*96+1] = 0;
+		force[2*96]	 = 0;
+		force[2*96+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*96+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*96+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*96+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*96+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*96+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*96+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*96+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*96+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(96+1)-1];
+		iterate = verlet[N*(96+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7491,37 +7685,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*96] 		+= temp_force*dx;
 			force[2*96+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*97];
-			yi = position[2*97+1];
+		xi = position[2*97];
+		yi = position[2*97+1];
 
-			force[2*97]	 = 0;
-			force[2*97+1] = 0;
+		force[2*97]	 = 0;
+		force[2*97+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*97+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*97+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*97+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*97+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*97+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*97+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*97+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*97+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(97+1)-1];
+		iterate = verlet[N*(97+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7537,37 +7733,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*97] 		+= temp_force*dx;
 			force[2*97+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*98];
-			yi = position[2*98+1];
+		xi = position[2*98];
+		yi = position[2*98+1];
 
-			force[2*98]	 = 0;
-			force[2*98+1] = 0;
+		force[2*98]	 = 0;
+		force[2*98+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*98+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*98+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*98+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*98+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*98+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*98+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*98+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*98+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(98+1)-1];
+		iterate = verlet[N*(98+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7583,37 +7781,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*98] 		+= temp_force*dx;
 			force[2*98+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*99];
-			yi = position[2*99+1];
+		xi = position[2*99];
+		yi = position[2*99+1];
 
-			force[2*99]	 = 0;
-			force[2*99+1] = 0;
+		force[2*99]	 = 0;
+		force[2*99+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*99+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*99+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*99+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*99+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*99+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*99+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*99+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*99+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(99+1)-1];
+		iterate = verlet[N*(99+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7629,37 +7829,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*99] 		+= temp_force*dx;
 			force[2*99+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*100];
-			yi = position[2*100+1];
+		xi = position[2*100];
+		yi = position[2*100+1];
 
-			force[2*100]	 = 0;
-			force[2*100+1] = 0;
+		force[2*100]	 = 0;
+		force[2*100+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*100+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*100+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*100+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*100+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*100+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*100+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*100+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*100+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(100+1)-1];
+		iterate = verlet[N*(100+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7675,37 +7877,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*100] 		+= temp_force*dx;
 			force[2*100+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*101];
-			yi = position[2*101+1];
+		xi = position[2*101];
+		yi = position[2*101+1];
 
-			force[2*101]	 = 0;
-			force[2*101+1] = 0;
+		force[2*101]	 = 0;
+		force[2*101+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*101+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*101+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*101+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*101+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*101+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*101+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*101+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*101+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(101+1)-1];
+		iterate = verlet[N*(101+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7721,37 +7925,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*101] 		+= temp_force*dx;
 			force[2*101+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*102];
-			yi = position[2*102+1];
+		xi = position[2*102];
+		yi = position[2*102+1];
 
-			force[2*102]	 = 0;
-			force[2*102+1] = 0;
+		force[2*102]	 = 0;
+		force[2*102+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*102+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*102+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*102+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*102+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*102+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*102+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*102+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*102+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(102+1)-1];
+		iterate = verlet[N*(102+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7767,37 +7973,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*102] 		+= temp_force*dx;
 			force[2*102+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*103];
-			yi = position[2*103+1];
+		xi = position[2*103];
+		yi = position[2*103+1];
 
-			force[2*103]	 = 0;
-			force[2*103+1] = 0;
+		force[2*103]	 = 0;
+		force[2*103+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*103+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*103+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*103+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*103+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*103+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*103+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*103+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*103+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(103+1)-1];
+		iterate = verlet[N*(103+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7813,37 +8021,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*103] 		+= temp_force*dx;
 			force[2*103+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*104];
-			yi = position[2*104+1];
+		xi = position[2*104];
+		yi = position[2*104+1];
 
-			force[2*104]	 = 0;
-			force[2*104+1] = 0;
+		force[2*104]	 = 0;
+		force[2*104+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*104+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*104+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*104+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*104+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*104+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*104+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*104+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*104+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(104+1)-1];
+		iterate = verlet[N*(104+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7859,37 +8069,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*104] 		+= temp_force*dx;
 			force[2*104+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*105];
-			yi = position[2*105+1];
+		xi = position[2*105];
+		yi = position[2*105+1];
 
-			force[2*105]	 = 0;
-			force[2*105+1] = 0;
+		force[2*105]	 = 0;
+		force[2*105+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*105+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*105+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*105+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*105+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*105+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*105+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*105+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*105+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(105+1)-1];
+		iterate = verlet[N*(105+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7905,37 +8117,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*105] 		+= temp_force*dx;
 			force[2*105+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*106];
-			yi = position[2*106+1];
+		xi = position[2*106];
+		yi = position[2*106+1];
 
-			force[2*106]	 = 0;
-			force[2*106+1] = 0;
+		force[2*106]	 = 0;
+		force[2*106+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*106+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*106+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*106+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*106+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*106+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*106+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*106+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*106+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(106+1)-1];
+		iterate = verlet[N*(106+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7951,37 +8165,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*106] 		+= temp_force*dx;
 			force[2*106+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*107];
-			yi = position[2*107+1];
+		xi = position[2*107];
+		yi = position[2*107+1];
 
-			force[2*107]	 = 0;
-			force[2*107+1] = 0;
+		force[2*107]	 = 0;
+		force[2*107+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*107+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*107+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*107+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*107+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*107+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*107+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*107+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*107+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(107+1)-1];
+		iterate = verlet[N*(107+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -7997,37 +8213,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*107] 		+= temp_force*dx;
 			force[2*107+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*108];
-			yi = position[2*108+1];
+		xi = position[2*108];
+		yi = position[2*108+1];
 
-			force[2*108]	 = 0;
-			force[2*108+1] = 0;
+		force[2*108]	 = 0;
+		force[2*108+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*108+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*108+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*108+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*108+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*108+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*108+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*108+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*108+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(108+1)-1];
+		iterate = verlet[N*(108+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -8043,37 +8261,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*108] 		+= temp_force*dx;
 			force[2*108+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*109];
-			yi = position[2*109+1];
+		xi = position[2*109];
+		yi = position[2*109+1];
 
-			force[2*109]	 = 0;
-			force[2*109+1] = 0;
+		force[2*109]	 = 0;
+		force[2*109+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*109+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*109+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*109+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*109+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*109+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*109+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*109+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*109+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(109+1)-1];
+		iterate = verlet[N*(109+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -8089,37 +8309,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*109] 		+= temp_force*dx;
 			force[2*109+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*110];
-			yi = position[2*110+1];
+		xi = position[2*110];
+		yi = position[2*110+1];
 
-			force[2*110]	 = 0;
-			force[2*110+1] = 0;
+		force[2*110]	 = 0;
+		force[2*110+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*110+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*110+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*110+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*110+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*110+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*110+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*110+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*110+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(110+1)-1];
+		iterate = verlet[N*(110+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -8135,37 +8357,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*110] 		+= temp_force*dx;
 			force[2*110+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*111];
-			yi = position[2*111+1];
+		xi = position[2*111];
+		yi = position[2*111+1];
 
-			force[2*111]	 = 0;
-			force[2*111+1] = 0;
+		force[2*111]	 = 0;
+		force[2*111+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*111+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*111+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*111+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*111+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*111+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*111+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*111+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*111+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(111+1)-1];
+		iterate = verlet[N*(111+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -8181,37 +8405,39 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*111] 		+= temp_force*dx;
 			force[2*111+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*112];
-			yi = position[2*112+1];
+		xi = position[2*112];
+		yi = position[2*112+1];
 
-			force[2*112]	 = 0;
-			force[2*112+1] = 0;
+		force[2*112]	 = 0;
+		force[2*112+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*112+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*112+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*112+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*112+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*112+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*112+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*112+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*112+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(112+1)-1];
+		iterate = verlet[N*(112+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -8227,7 +8453,9 @@ static void *iteration_2 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*112] 		+= temp_force*dx;
 			force[2*112+1]	+= temp_force*dy;
@@ -9591,6 +9819,8 @@ static void *iteration_3 (int *no) {
 	int iterate;
 	int j;
 
+	int cut;
+
 	double m_i_A = 1.0;
 	double m_i_B = m;
 
@@ -9605,36 +9835,34 @@ static void *iteration_3 (int *no) {
 	double dist_top;
 
 	// cutoff for the walls force, this will lead to a smoother transition
-	double dist_cutoff 			= 1.0;
 	double prefactor			= 3.0;
-	double force_wall_cutoff 	= 1.0*prefactor *(kappa/dist_cutoff + 1.0/(dist_cutoff*dist_cutoff))*exp(-kappa*dist_cutoff);
 
 	while(cont == 1) {
-			xi = position[2*113];
-			yi = position[2*113+1];
+		xi = position[2*113];
+		yi = position[2*113+1];
 
-			force[2*113]	 = 0;
-			force[2*113+1] = 0;
+		force[2*113]	 = 0;
+		force[2*113+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*113+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*113+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*113+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*113+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*113+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*113+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*113+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*113+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(113+1)-1];
+		iterate = verlet[N*(113+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -9650,37 +9878,39 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*113] 		+= temp_force*dx;
 			force[2*113+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*114];
-			yi = position[2*114+1];
+		xi = position[2*114];
+		yi = position[2*114+1];
 
-			force[2*114]	 = 0;
-			force[2*114+1] = 0;
+		force[2*114]	 = 0;
+		force[2*114+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*114+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*114+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*114+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*114+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*114+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*114+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*114+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*114+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(114+1)-1];
+		iterate = verlet[N*(114+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -9696,37 +9926,39 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*114] 		+= temp_force*dx;
 			force[2*114+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*115];
-			yi = position[2*115+1];
+		xi = position[2*115];
+		yi = position[2*115+1];
 
-			force[2*115]	 = 0;
-			force[2*115+1] = 0;
+		force[2*115]	 = 0;
+		force[2*115+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*115+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*115+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*115+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*115+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*115+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*115+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*115+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*115+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(115+1)-1];
+		iterate = verlet[N*(115+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -9742,37 +9974,39 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*115] 		+= temp_force*dx;
 			force[2*115+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*116];
-			yi = position[2*116+1];
+		xi = position[2*116];
+		yi = position[2*116+1];
 
-			force[2*116]	 = 0;
-			force[2*116+1] = 0;
+		force[2*116]	 = 0;
+		force[2*116+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*116+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*116+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*116+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*116+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*116+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*116+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*116+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*116+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(116+1)-1];
+		iterate = verlet[N*(116+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -9788,37 +10022,39 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*116] 		+= temp_force*dx;
 			force[2*116+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*117];
-			yi = position[2*117+1];
+		xi = position[2*117];
+		yi = position[2*117+1];
 
-			force[2*117]	 = 0;
-			force[2*117+1] = 0;
+		force[2*117]	 = 0;
+		force[2*117+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*117+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*117+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*117+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*117+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*117+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*117+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*117+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*117+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(117+1)-1];
+		iterate = verlet[N*(117+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -9834,37 +10070,39 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*117] 		+= temp_force*dx;
 			force[2*117+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*118];
-			yi = position[2*118+1];
+		xi = position[2*118];
+		yi = position[2*118+1];
 
-			force[2*118]	 = 0;
-			force[2*118+1] = 0;
+		force[2*118]	 = 0;
+		force[2*118+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*118+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*118+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*118+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*118+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*118+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*118+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*118+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*118+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(118+1)-1];
+		iterate = verlet[N*(118+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -9880,37 +10118,39 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*118] 		+= temp_force*dx;
 			force[2*118+1]	+= temp_force*dy;
 		}
 
-			xi = position[2*119];
-			yi = position[2*119+1];
+		xi = position[2*119];
+		yi = position[2*119+1];
 
-			force[2*119]	 = 0;
-			force[2*119+1] = 0;
+		force[2*119]	 = 0;
+		force[2*119+1] = 0;
 
-			if (yi <= 1e-12) {
-				dist_bottom = 1e-12;
-				force[2*119+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
-			else if (yi <= dist_cutoff) {
-				dist_bottom = yi;
-				force[2*119+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
-			}
+		if (yi <= 1e-12) {
+			dist_bottom = 1e-12;
+			force[2*119+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
+		else {
+			dist_bottom = yi;
+			force[2*119+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
+		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*119+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*119+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*119+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*119+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
-			iterate = verlet[N*(119+1)-1];
+		iterate = verlet[N*(119+1)-1];
 
 			for (int k=0; k<iterate; k+=1) {
 
@@ -9926,7 +10166,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_A*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*119] 		+= temp_force*dx;
 			force[2*119+1]	+= temp_force*dy;
@@ -9940,21 +10182,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*120+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*120+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*120+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*120+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*120+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*120+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*120+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*120+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(120+1)-1];
 
@@ -9972,7 +10214,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*120] 		+= temp_force*dx;
 			force[2*120+1]	+= temp_force*dy;
@@ -9986,21 +10230,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*121+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*121+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*121+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*121+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*121+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*121+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*121+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*121+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(121+1)-1];
 
@@ -10018,7 +10262,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*121] 		+= temp_force*dx;
 			force[2*121+1]	+= temp_force*dy;
@@ -10032,21 +10278,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*122+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*122+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*122+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*122+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*122+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*122+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*122+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*122+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(122+1)-1];
 
@@ -10064,7 +10310,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*122] 		+= temp_force*dx;
 			force[2*122+1]	+= temp_force*dy;
@@ -10078,21 +10326,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*123+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*123+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*123+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*123+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*123+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*123+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*123+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*123+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(123+1)-1];
 
@@ -10110,7 +10358,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*123] 		+= temp_force*dx;
 			force[2*123+1]	+= temp_force*dy;
@@ -10124,21 +10374,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*124+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*124+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*124+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*124+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*124+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*124+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*124+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*124+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(124+1)-1];
 
@@ -10156,7 +10406,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*124] 		+= temp_force*dx;
 			force[2*124+1]	+= temp_force*dy;
@@ -10170,21 +10422,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*125+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*125+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*125+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*125+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*125+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*125+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*125+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*125+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(125+1)-1];
 
@@ -10202,7 +10454,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*125] 		+= temp_force*dx;
 			force[2*125+1]	+= temp_force*dy;
@@ -10216,21 +10470,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*126+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*126+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*126+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*126+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*126+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*126+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*126+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*126+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(126+1)-1];
 
@@ -10248,7 +10502,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*126] 		+= temp_force*dx;
 			force[2*126+1]	+= temp_force*dy;
@@ -10262,21 +10518,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*127+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*127+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*127+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*127+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*127+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*127+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*127+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*127+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(127+1)-1];
 
@@ -10294,7 +10550,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*127] 		+= temp_force*dx;
 			force[2*127+1]	+= temp_force*dy;
@@ -10308,21 +10566,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*128+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*128+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*128+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*128+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*128+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*128+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*128+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*128+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(128+1)-1];
 
@@ -10340,7 +10598,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*128] 		+= temp_force*dx;
 			force[2*128+1]	+= temp_force*dy;
@@ -10354,21 +10614,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*129+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*129+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*129+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*129+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*129+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*129+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*129+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*129+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(129+1)-1];
 
@@ -10386,7 +10646,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*129] 		+= temp_force*dx;
 			force[2*129+1]	+= temp_force*dy;
@@ -10400,21 +10662,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*130+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*130+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*130+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*130+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*130+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*130+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*130+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*130+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(130+1)-1];
 
@@ -10432,7 +10694,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*130] 		+= temp_force*dx;
 			force[2*130+1]	+= temp_force*dy;
@@ -10446,21 +10710,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*131+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*131+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*131+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*131+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*131+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*131+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*131+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*131+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(131+1)-1];
 
@@ -10478,7 +10742,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*131] 		+= temp_force*dx;
 			force[2*131+1]	+= temp_force*dy;
@@ -10492,21 +10758,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*132+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*132+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*132+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*132+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*132+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*132+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*132+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*132+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(132+1)-1];
 
@@ -10524,7 +10790,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*132] 		+= temp_force*dx;
 			force[2*132+1]	+= temp_force*dy;
@@ -10538,21 +10806,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*133+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*133+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*133+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*133+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*133+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*133+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*133+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*133+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(133+1)-1];
 
@@ -10570,7 +10838,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*133] 		+= temp_force*dx;
 			force[2*133+1]	+= temp_force*dy;
@@ -10584,21 +10854,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*134+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*134+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*134+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*134+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*134+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*134+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*134+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*134+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(134+1)-1];
 
@@ -10616,7 +10886,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*134] 		+= temp_force*dx;
 			force[2*134+1]	+= temp_force*dy;
@@ -10630,21 +10902,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*135+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*135+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*135+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*135+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*135+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*135+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*135+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*135+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(135+1)-1];
 
@@ -10662,7 +10934,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*135] 		+= temp_force*dx;
 			force[2*135+1]	+= temp_force*dy;
@@ -10676,21 +10950,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*136+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*136+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*136+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*136+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*136+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*136+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*136+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*136+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(136+1)-1];
 
@@ -10708,7 +10982,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*136] 		+= temp_force*dx;
 			force[2*136+1]	+= temp_force*dy;
@@ -10722,21 +10998,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*137+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*137+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*137+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*137+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*137+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*137+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*137+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*137+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(137+1)-1];
 
@@ -10754,7 +11030,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*137] 		+= temp_force*dx;
 			force[2*137+1]	+= temp_force*dy;
@@ -10768,21 +11046,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*138+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*138+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*138+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*138+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*138+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*138+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*138+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*138+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(138+1)-1];
 
@@ -10800,7 +11078,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*138] 		+= temp_force*dx;
 			force[2*138+1]	+= temp_force*dy;
@@ -10814,21 +11094,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*139+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*139+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*139+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*139+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*139+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*139+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*139+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*139+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(139+1)-1];
 
@@ -10846,7 +11126,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*139] 		+= temp_force*dx;
 			force[2*139+1]	+= temp_force*dy;
@@ -10860,21 +11142,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*140+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*140+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*140+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*140+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*140+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*140+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*140+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*140+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(140+1)-1];
 
@@ -10892,7 +11174,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*140] 		+= temp_force*dx;
 			force[2*140+1]	+= temp_force*dy;
@@ -10906,21 +11190,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*141+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*141+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*141+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*141+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*141+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*141+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*141+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*141+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(141+1)-1];
 
@@ -10938,7 +11222,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*141] 		+= temp_force*dx;
 			force[2*141+1]	+= temp_force*dy;
@@ -10952,21 +11238,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*142+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*142+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*142+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*142+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*142+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*142+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*142+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*142+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(142+1)-1];
 
@@ -10984,7 +11270,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*142] 		+= temp_force*dx;
 			force[2*142+1]	+= temp_force*dy;
@@ -10998,21 +11286,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*143+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*143+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*143+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*143+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*143+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*143+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*143+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*143+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(143+1)-1];
 
@@ -11030,7 +11318,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*143] 		+= temp_force*dx;
 			force[2*143+1]	+= temp_force*dy;
@@ -11044,21 +11334,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*144+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*144+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*144+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*144+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*144+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*144+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*144+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*144+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(144+1)-1];
 
@@ -11076,7 +11366,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*144] 		+= temp_force*dx;
 			force[2*144+1]	+= temp_force*dy;
@@ -11090,21 +11382,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*145+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*145+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*145+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*145+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*145+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*145+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*145+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*145+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(145+1)-1];
 
@@ -11122,7 +11414,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*145] 		+= temp_force*dx;
 			force[2*145+1]	+= temp_force*dy;
@@ -11136,21 +11430,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*146+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*146+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*146+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*146+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*146+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*146+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*146+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*146+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(146+1)-1];
 
@@ -11168,7 +11462,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*146] 		+= temp_force*dx;
 			force[2*146+1]	+= temp_force*dy;
@@ -11182,21 +11478,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*147+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*147+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*147+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*147+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*147+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*147+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*147+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*147+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(147+1)-1];
 
@@ -11214,7 +11510,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*147] 		+= temp_force*dx;
 			force[2*147+1]	+= temp_force*dy;
@@ -11228,21 +11526,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*148+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*148+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*148+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*148+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*148+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*148+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*148+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*148+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(148+1)-1];
 
@@ -11260,7 +11558,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*148] 		+= temp_force*dx;
 			force[2*148+1]	+= temp_force*dy;
@@ -11274,21 +11574,21 @@ static void *iteration_3 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*149+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*149+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*149+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*149+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*149+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*149+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*149+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*149+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(149+1)-1];
 
@@ -11306,7 +11606,9 @@ static void *iteration_3 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*149] 		+= temp_force*dx;
 			force[2*149+1]	+= temp_force*dy;
@@ -12635,6 +12937,8 @@ static void *iteration_4 (int *no) {
 	int iterate;
 	int j;
 
+	int cut;
+
 	double m_i_A = 1.0;
 	double m_i_B = m;
 
@@ -12649,9 +12953,7 @@ static void *iteration_4 (int *no) {
 	double dist_top;
 
 	// cutoff for the walls force, this will lead to a smoother transition
-	double dist_cutoff 			= 1.0;
 	double prefactor			= 3.0;
-	double force_wall_cutoff 	= 1.0*prefactor *(kappa/dist_cutoff + 1.0/(dist_cutoff*dist_cutoff))*exp(-kappa*dist_cutoff);
 
 	while(cont == 1) {
 		xi = position[2*150];
@@ -12662,21 +12964,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*150+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*150+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*150+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*150+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*150+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*150+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*150+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*150+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(150+1)-1];
 
@@ -12694,7 +12996,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*150] 		+= temp_force*dx;
 			force[2*150+1]	+= temp_force*dy;
@@ -12708,21 +13012,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*151+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*151+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*151+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*151+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*151+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*151+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*151+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*151+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(151+1)-1];
 
@@ -12740,7 +13044,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*151] 		+= temp_force*dx;
 			force[2*151+1]	+= temp_force*dy;
@@ -12754,21 +13060,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*152+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*152+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*152+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*152+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*152+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*152+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*152+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*152+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(152+1)-1];
 
@@ -12786,7 +13092,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*152] 		+= temp_force*dx;
 			force[2*152+1]	+= temp_force*dy;
@@ -12800,21 +13108,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*153+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*153+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*153+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*153+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*153+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*153+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*153+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*153+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(153+1)-1];
 
@@ -12832,7 +13140,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*153] 		+= temp_force*dx;
 			force[2*153+1]	+= temp_force*dy;
@@ -12846,21 +13156,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*154+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*154+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*154+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*154+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*154+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*154+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*154+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*154+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(154+1)-1];
 
@@ -12878,7 +13188,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*154] 		+= temp_force*dx;
 			force[2*154+1]	+= temp_force*dy;
@@ -12892,21 +13204,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*155+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*155+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*155+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*155+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*155+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*155+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*155+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*155+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(155+1)-1];
 
@@ -12924,7 +13236,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*155] 		+= temp_force*dx;
 			force[2*155+1]	+= temp_force*dy;
@@ -12938,21 +13252,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*156+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*156+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*156+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*156+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*156+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*156+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*156+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*156+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(156+1)-1];
 
@@ -12970,7 +13284,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*156] 		+= temp_force*dx;
 			force[2*156+1]	+= temp_force*dy;
@@ -12984,21 +13300,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*157+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*157+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*157+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*157+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*157+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*157+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*157+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*157+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(157+1)-1];
 
@@ -13016,7 +13332,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*157] 		+= temp_force*dx;
 			force[2*157+1]	+= temp_force*dy;
@@ -13030,21 +13348,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*158+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*158+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*158+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*158+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*158+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*158+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*158+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*158+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(158+1)-1];
 
@@ -13062,7 +13380,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*158] 		+= temp_force*dx;
 			force[2*158+1]	+= temp_force*dy;
@@ -13076,21 +13396,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*159+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*159+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*159+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*159+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*159+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*159+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*159+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*159+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(159+1)-1];
 
@@ -13108,7 +13428,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*159] 		+= temp_force*dx;
 			force[2*159+1]	+= temp_force*dy;
@@ -13122,21 +13444,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*160+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*160+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*160+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*160+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*160+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*160+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*160+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*160+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(160+1)-1];
 
@@ -13154,7 +13476,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*160] 		+= temp_force*dx;
 			force[2*160+1]	+= temp_force*dy;
@@ -13168,21 +13492,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*161+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*161+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*161+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*161+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*161+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*161+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*161+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*161+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(161+1)-1];
 
@@ -13200,7 +13524,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*161] 		+= temp_force*dx;
 			force[2*161+1]	+= temp_force*dy;
@@ -13214,21 +13540,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*162+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*162+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*162+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*162+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*162+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*162+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*162+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*162+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(162+1)-1];
 
@@ -13246,7 +13572,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*162] 		+= temp_force*dx;
 			force[2*162+1]	+= temp_force*dy;
@@ -13260,21 +13588,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*163+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*163+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*163+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*163+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*163+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*163+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*163+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*163+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(163+1)-1];
 
@@ -13292,7 +13620,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*163] 		+= temp_force*dx;
 			force[2*163+1]	+= temp_force*dy;
@@ -13306,21 +13636,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*164+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*164+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*164+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*164+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*164+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*164+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*164+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*164+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(164+1)-1];
 
@@ -13338,7 +13668,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*164] 		+= temp_force*dx;
 			force[2*164+1]	+= temp_force*dy;
@@ -13352,21 +13684,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*165+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*165+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*165+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*165+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*165+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*165+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*165+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*165+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(165+1)-1];
 
@@ -13384,7 +13716,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*165] 		+= temp_force*dx;
 			force[2*165+1]	+= temp_force*dy;
@@ -13398,21 +13732,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*166+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*166+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*166+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*166+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*166+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*166+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*166+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*166+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(166+1)-1];
 
@@ -13430,7 +13764,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*166] 		+= temp_force*dx;
 			force[2*166+1]	+= temp_force*dy;
@@ -13444,21 +13780,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*167+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*167+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*167+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*167+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*167+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*167+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*167+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*167+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(167+1)-1];
 
@@ -13476,7 +13812,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*167] 		+= temp_force*dx;
 			force[2*167+1]	+= temp_force*dy;
@@ -13490,21 +13828,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*168+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*168+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*168+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*168+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*168+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*168+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*168+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*168+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(168+1)-1];
 
@@ -13522,7 +13860,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*168] 		+= temp_force*dx;
 			force[2*168+1]	+= temp_force*dy;
@@ -13536,21 +13876,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*169+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*169+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*169+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*169+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*169+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*169+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*169+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*169+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(169+1)-1];
 
@@ -13568,7 +13908,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*169] 		+= temp_force*dx;
 			force[2*169+1]	+= temp_force*dy;
@@ -13582,21 +13924,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*170+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*170+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*170+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*170+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*170+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*170+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*170+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*170+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(170+1)-1];
 
@@ -13614,7 +13956,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*170] 		+= temp_force*dx;
 			force[2*170+1]	+= temp_force*dy;
@@ -13628,21 +13972,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*171+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*171+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*171+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*171+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*171+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*171+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*171+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*171+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(171+1)-1];
 
@@ -13660,7 +14004,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*171] 		+= temp_force*dx;
 			force[2*171+1]	+= temp_force*dy;
@@ -13674,21 +14020,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*172+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*172+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*172+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*172+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*172+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*172+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*172+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*172+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(172+1)-1];
 
@@ -13706,7 +14052,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*172] 		+= temp_force*dx;
 			force[2*172+1]	+= temp_force*dy;
@@ -13720,21 +14068,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*173+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*173+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*173+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*173+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*173+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*173+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*173+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*173+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(173+1)-1];
 
@@ -13752,7 +14100,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*173] 		+= temp_force*dx;
 			force[2*173+1]	+= temp_force*dy;
@@ -13766,21 +14116,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*174+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*174+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*174+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*174+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*174+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*174+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*174+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*174+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(174+1)-1];
 
@@ -13798,7 +14148,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*174] 		+= temp_force*dx;
 			force[2*174+1]	+= temp_force*dy;
@@ -13812,21 +14164,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*175+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*175+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*175+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*175+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*175+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*175+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*175+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*175+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(175+1)-1];
 
@@ -13844,7 +14196,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*175] 		+= temp_force*dx;
 			force[2*175+1]	+= temp_force*dy;
@@ -13858,21 +14212,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*176+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*176+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*176+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*176+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*176+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*176+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*176+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*176+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(176+1)-1];
 
@@ -13890,7 +14244,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*176] 		+= temp_force*dx;
 			force[2*176+1]	+= temp_force*dy;
@@ -13904,21 +14260,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*177+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*177+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*177+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*177+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*177+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*177+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*177+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*177+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(177+1)-1];
 
@@ -13936,7 +14292,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*177] 		+= temp_force*dx;
 			force[2*177+1]	+= temp_force*dy;
@@ -13950,21 +14308,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*178+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*178+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*178+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*178+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*178+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*178+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*178+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*178+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(178+1)-1];
 
@@ -13982,7 +14340,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*178] 		+= temp_force*dx;
 			force[2*178+1]	+= temp_force*dy;
@@ -13996,21 +14356,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*179+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*179+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*179+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*179+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*179+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*179+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*179+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*179+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(179+1)-1];
 
@@ -14028,7 +14388,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*179] 		+= temp_force*dx;
 			force[2*179+1]	+= temp_force*dy;
@@ -14042,21 +14404,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*180+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*180+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*180+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*180+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*180+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*180+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*180+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*180+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(180+1)-1];
 
@@ -14074,7 +14436,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*180] 		+= temp_force*dx;
 			force[2*180+1]	+= temp_force*dy;
@@ -14088,21 +14452,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*181+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*181+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*181+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*181+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*181+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*181+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*181+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*181+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(181+1)-1];
 
@@ -14120,7 +14484,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*181] 		+= temp_force*dx;
 			force[2*181+1]	+= temp_force*dy;
@@ -14134,21 +14500,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*182+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*182+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*182+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*182+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*182+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*182+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*182+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*182+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(182+1)-1];
 
@@ -14166,7 +14532,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*182] 		+= temp_force*dx;
 			force[2*182+1]	+= temp_force*dy;
@@ -14180,21 +14548,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*183+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*183+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*183+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*183+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*183+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*183+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*183+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*183+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(183+1)-1];
 
@@ -14212,7 +14580,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*183] 		+= temp_force*dx;
 			force[2*183+1]	+= temp_force*dy;
@@ -14226,21 +14596,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*184+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*184+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*184+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*184+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*184+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*184+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*184+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*184+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(184+1)-1];
 
@@ -14258,7 +14628,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*184] 		+= temp_force*dx;
 			force[2*184+1]	+= temp_force*dy;
@@ -14272,21 +14644,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*185+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*185+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*185+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*185+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*185+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*185+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*185+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*185+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(185+1)-1];
 
@@ -14304,7 +14676,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*185] 		+= temp_force*dx;
 			force[2*185+1]	+= temp_force*dy;
@@ -14318,21 +14692,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*186+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*186+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*186+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*186+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*186+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*186+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*186+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*186+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(186+1)-1];
 
@@ -14350,7 +14724,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*186] 		+= temp_force*dx;
 			force[2*186+1]	+= temp_force*dy;
@@ -14364,21 +14740,21 @@ static void *iteration_4 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*187+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*187+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*187+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*187+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*187+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*187+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*187+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*187+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(187+1)-1];
 
@@ -14396,7 +14772,9 @@ static void *iteration_4 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*187] 		+= temp_force*dx;
 			force[2*187+1]	+= temp_force*dy;
@@ -15760,6 +16138,8 @@ static void *iteration_5 (int *no) {
 	int iterate;
 	int j;
 
+	int cut;
+
 	double m_i_A = 1.0;
 	double m_i_B = m;
 
@@ -15774,9 +16154,7 @@ static void *iteration_5 (int *no) {
 	double dist_top;
 
 	// cutoff for the walls force, this will lead to a smoother transition
-	double dist_cutoff 			= 1.0;
 	double prefactor			= 3.0;
-	double force_wall_cutoff 	= 1.0*prefactor *(kappa/dist_cutoff + 1.0/(dist_cutoff*dist_cutoff))*exp(-kappa*dist_cutoff);
 
 	while(cont == 1) {
 		xi = position[2*188];
@@ -15787,21 +16165,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*188+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*188+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*188+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*188+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*188+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*188+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*188+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*188+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(188+1)-1];
 
@@ -15819,7 +16197,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*188] 		+= temp_force*dx;
 			force[2*188+1]	+= temp_force*dy;
@@ -15833,21 +16213,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*189+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*189+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*189+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*189+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*189+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*189+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*189+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*189+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(189+1)-1];
 
@@ -15865,7 +16245,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*189] 		+= temp_force*dx;
 			force[2*189+1]	+= temp_force*dy;
@@ -15879,21 +16261,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*190+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*190+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*190+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*190+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*190+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*190+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*190+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*190+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(190+1)-1];
 
@@ -15911,7 +16293,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*190] 		+= temp_force*dx;
 			force[2*190+1]	+= temp_force*dy;
@@ -15925,21 +16309,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*191+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*191+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*191+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*191+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*191+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*191+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*191+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*191+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(191+1)-1];
 
@@ -15957,7 +16341,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*191] 		+= temp_force*dx;
 			force[2*191+1]	+= temp_force*dy;
@@ -15971,21 +16357,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*192+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*192+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*192+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*192+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*192+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*192+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*192+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*192+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(192+1)-1];
 
@@ -16003,7 +16389,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*192] 		+= temp_force*dx;
 			force[2*192+1]	+= temp_force*dy;
@@ -16017,21 +16405,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*193+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*193+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*193+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*193+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*193+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*193+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*193+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*193+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(193+1)-1];
 
@@ -16049,7 +16437,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*193] 		+= temp_force*dx;
 			force[2*193+1]	+= temp_force*dy;
@@ -16063,21 +16453,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*194+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*194+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*194+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*194+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*194+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*194+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*194+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*194+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(194+1)-1];
 
@@ -16095,7 +16485,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*194] 		+= temp_force*dx;
 			force[2*194+1]	+= temp_force*dy;
@@ -16109,21 +16501,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*195+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*195+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*195+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*195+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*195+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*195+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*195+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*195+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(195+1)-1];
 
@@ -16141,7 +16533,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*195] 		+= temp_force*dx;
 			force[2*195+1]	+= temp_force*dy;
@@ -16155,21 +16549,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*196+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*196+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*196+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*196+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*196+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*196+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*196+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*196+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(196+1)-1];
 
@@ -16187,7 +16581,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*196] 		+= temp_force*dx;
 			force[2*196+1]	+= temp_force*dy;
@@ -16201,21 +16597,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*197+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*197+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*197+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*197+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*197+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*197+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*197+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*197+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(197+1)-1];
 
@@ -16233,7 +16629,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*197] 		+= temp_force*dx;
 			force[2*197+1]	+= temp_force*dy;
@@ -16247,21 +16645,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*198+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*198+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*198+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*198+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*198+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*198+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*198+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*198+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(198+1)-1];
 
@@ -16279,7 +16677,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*198] 		+= temp_force*dx;
 			force[2*198+1]	+= temp_force*dy;
@@ -16293,21 +16693,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*199+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*199+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*199+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*199+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*199+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*199+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*199+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*199+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(199+1)-1];
 
@@ -16325,7 +16725,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*199] 		+= temp_force*dx;
 			force[2*199+1]	+= temp_force*dy;
@@ -16339,21 +16741,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*200+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*200+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*200+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*200+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*200+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*200+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*200+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*200+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(200+1)-1];
 
@@ -16371,7 +16773,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*200] 		+= temp_force*dx;
 			force[2*200+1]	+= temp_force*dy;
@@ -16385,21 +16789,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*201+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*201+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*201+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*201+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*201+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*201+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*201+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*201+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(201+1)-1];
 
@@ -16417,7 +16821,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*201] 		+= temp_force*dx;
 			force[2*201+1]	+= temp_force*dy;
@@ -16431,21 +16837,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*202+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*202+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*202+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*202+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*202+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*202+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*202+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*202+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(202+1)-1];
 
@@ -16463,7 +16869,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*202] 		+= temp_force*dx;
 			force[2*202+1]	+= temp_force*dy;
@@ -16477,21 +16885,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*203+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*203+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*203+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*203+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*203+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*203+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*203+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*203+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(203+1)-1];
 
@@ -16509,7 +16917,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*203] 		+= temp_force*dx;
 			force[2*203+1]	+= temp_force*dy;
@@ -16523,21 +16933,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*204+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*204+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*204+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*204+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*204+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*204+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*204+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*204+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(204+1)-1];
 
@@ -16555,7 +16965,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*204] 		+= temp_force*dx;
 			force[2*204+1]	+= temp_force*dy;
@@ -16569,21 +16981,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*205+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*205+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*205+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*205+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*205+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*205+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*205+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*205+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(205+1)-1];
 
@@ -16601,7 +17013,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*205] 		+= temp_force*dx;
 			force[2*205+1]	+= temp_force*dy;
@@ -16615,21 +17029,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*206+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*206+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*206+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*206+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*206+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*206+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*206+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*206+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(206+1)-1];
 
@@ -16647,7 +17061,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*206] 		+= temp_force*dx;
 			force[2*206+1]	+= temp_force*dy;
@@ -16661,21 +17077,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*207+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*207+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*207+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*207+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*207+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*207+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*207+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*207+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(207+1)-1];
 
@@ -16693,7 +17109,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*207] 		+= temp_force*dx;
 			force[2*207+1]	+= temp_force*dy;
@@ -16707,21 +17125,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*208+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*208+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*208+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*208+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*208+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*208+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*208+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*208+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(208+1)-1];
 
@@ -16739,7 +17157,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*208] 		+= temp_force*dx;
 			force[2*208+1]	+= temp_force*dy;
@@ -16753,21 +17173,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*209+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*209+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*209+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*209+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*209+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*209+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*209+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*209+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(209+1)-1];
 
@@ -16785,7 +17205,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*209] 		+= temp_force*dx;
 			force[2*209+1]	+= temp_force*dy;
@@ -16799,21 +17221,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*210+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*210+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*210+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*210+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*210+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*210+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*210+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*210+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(210+1)-1];
 
@@ -16831,7 +17253,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*210] 		+= temp_force*dx;
 			force[2*210+1]	+= temp_force*dy;
@@ -16845,21 +17269,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*211+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*211+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*211+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*211+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*211+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*211+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*211+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*211+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(211+1)-1];
 
@@ -16877,7 +17301,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*211] 		+= temp_force*dx;
 			force[2*211+1]	+= temp_force*dy;
@@ -16891,21 +17317,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*212+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*212+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*212+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*212+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*212+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*212+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*212+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*212+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(212+1)-1];
 
@@ -16923,7 +17349,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*212] 		+= temp_force*dx;
 			force[2*212+1]	+= temp_force*dy;
@@ -16937,21 +17365,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*213+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*213+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*213+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*213+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*213+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*213+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*213+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*213+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(213+1)-1];
 
@@ -16969,7 +17397,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*213] 		+= temp_force*dx;
 			force[2*213+1]	+= temp_force*dy;
@@ -16983,21 +17413,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*214+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*214+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*214+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*214+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*214+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*214+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*214+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*214+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(214+1)-1];
 
@@ -17015,7 +17445,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*214] 		+= temp_force*dx;
 			force[2*214+1]	+= temp_force*dy;
@@ -17029,21 +17461,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*215+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*215+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*215+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*215+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*215+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*215+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*215+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*215+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(215+1)-1];
 
@@ -17061,7 +17493,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*215] 		+= temp_force*dx;
 			force[2*215+1]	+= temp_force*dy;
@@ -17075,21 +17509,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*216+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*216+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*216+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*216+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*216+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*216+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*216+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*216+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(216+1)-1];
 
@@ -17107,7 +17541,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*216] 		+= temp_force*dx;
 			force[2*216+1]	+= temp_force*dy;
@@ -17121,21 +17557,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*217+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*217+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*217+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*217+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*217+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*217+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*217+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*217+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(217+1)-1];
 
@@ -17153,7 +17589,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*217] 		+= temp_force*dx;
 			force[2*217+1]	+= temp_force*dy;
@@ -17167,21 +17605,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*218+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*218+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*218+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*218+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*218+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*218+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*218+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*218+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(218+1)-1];
 
@@ -17199,7 +17637,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*218] 		+= temp_force*dx;
 			force[2*218+1]	+= temp_force*dy;
@@ -17213,21 +17653,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*219+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*219+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*219+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*219+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*219+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*219+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*219+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*219+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(219+1)-1];
 
@@ -17245,7 +17685,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*219] 		+= temp_force*dx;
 			force[2*219+1]	+= temp_force*dy;
@@ -17259,21 +17701,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*220+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*220+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*220+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*220+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*220+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*220+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*220+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*220+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(220+1)-1];
 
@@ -17291,7 +17733,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*220] 		+= temp_force*dx;
 			force[2*220+1]	+= temp_force*dy;
@@ -17305,21 +17749,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*221+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*221+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*221+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*221+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*221+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*221+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*221+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*221+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(221+1)-1];
 
@@ -17337,7 +17781,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*221] 		+= temp_force*dx;
 			force[2*221+1]	+= temp_force*dy;
@@ -17351,21 +17797,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*222+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*222+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*222+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*222+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*222+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*222+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*222+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*222+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(222+1)-1];
 
@@ -17383,7 +17829,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*222] 		+= temp_force*dx;
 			force[2*222+1]	+= temp_force*dy;
@@ -17397,21 +17845,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*223+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*223+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*223+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*223+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*223+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*223+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*223+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*223+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(223+1)-1];
 
@@ -17429,7 +17877,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*223] 		+= temp_force*dx;
 			force[2*223+1]	+= temp_force*dy;
@@ -17443,21 +17893,21 @@ static void *iteration_5 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*224+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*224+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*224+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*224+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*224+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*224+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*224+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*224+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(224+1)-1];
 
@@ -17475,7 +17925,9 @@ static void *iteration_5 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*224] 		+= temp_force*dx;
 			force[2*224+1]	+= temp_force*dy;
@@ -18804,6 +19256,8 @@ static void *iteration_6 (int *no) {
 	int iterate;
 	int j;
 
+	int cut;
+
 	double m_i_A = 1.0;
 	double m_i_B = m;
 
@@ -18818,9 +19272,7 @@ static void *iteration_6 (int *no) {
 	double dist_top;
 
 	// cutoff for the walls force, this will lead to a smoother transition
-	double dist_cutoff 			= 1.0;
 	double prefactor			= 3.0;
-	double force_wall_cutoff 	= 1.0*prefactor *(kappa/dist_cutoff + 1.0/(dist_cutoff*dist_cutoff))*exp(-kappa*dist_cutoff);
 
 	while(cont == 1) {
 		xi = position[2*225];
@@ -18831,21 +19283,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*225+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*225+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*225+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*225+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*225+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*225+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*225+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*225+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(225+1)-1];
 
@@ -18863,7 +19315,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*225] 		+= temp_force*dx;
 			force[2*225+1]	+= temp_force*dy;
@@ -18877,21 +19331,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*226+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*226+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*226+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*226+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*226+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*226+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*226+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*226+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(226+1)-1];
 
@@ -18909,7 +19363,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*226] 		+= temp_force*dx;
 			force[2*226+1]	+= temp_force*dy;
@@ -18923,21 +19379,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*227+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*227+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*227+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*227+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*227+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*227+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*227+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*227+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(227+1)-1];
 
@@ -18955,7 +19411,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*227] 		+= temp_force*dx;
 			force[2*227+1]	+= temp_force*dy;
@@ -18969,21 +19427,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*228+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*228+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*228+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*228+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*228+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*228+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*228+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*228+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(228+1)-1];
 
@@ -19001,7 +19459,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*228] 		+= temp_force*dx;
 			force[2*228+1]	+= temp_force*dy;
@@ -19015,21 +19475,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*229+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*229+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*229+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*229+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*229+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*229+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*229+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*229+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(229+1)-1];
 
@@ -19047,7 +19507,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*229] 		+= temp_force*dx;
 			force[2*229+1]	+= temp_force*dy;
@@ -19061,21 +19523,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*230+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*230+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*230+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*230+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*230+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*230+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*230+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*230+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(230+1)-1];
 
@@ -19093,7 +19555,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*230] 		+= temp_force*dx;
 			force[2*230+1]	+= temp_force*dy;
@@ -19107,21 +19571,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*231+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*231+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*231+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*231+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*231+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*231+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*231+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*231+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(231+1)-1];
 
@@ -19139,7 +19603,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*231] 		+= temp_force*dx;
 			force[2*231+1]	+= temp_force*dy;
@@ -19153,21 +19619,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*232+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*232+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*232+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*232+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*232+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*232+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*232+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*232+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(232+1)-1];
 
@@ -19185,7 +19651,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*232] 		+= temp_force*dx;
 			force[2*232+1]	+= temp_force*dy;
@@ -19199,21 +19667,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*233+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*233+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*233+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*233+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*233+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*233+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*233+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*233+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(233+1)-1];
 
@@ -19231,7 +19699,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*233] 		+= temp_force*dx;
 			force[2*233+1]	+= temp_force*dy;
@@ -19245,21 +19715,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*234+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*234+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*234+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*234+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*234+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*234+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*234+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*234+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(234+1)-1];
 
@@ -19277,7 +19747,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*234] 		+= temp_force*dx;
 			force[2*234+1]	+= temp_force*dy;
@@ -19291,21 +19763,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*235+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*235+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*235+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*235+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*235+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*235+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*235+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*235+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(235+1)-1];
 
@@ -19323,7 +19795,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*235] 		+= temp_force*dx;
 			force[2*235+1]	+= temp_force*dy;
@@ -19337,21 +19811,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*236+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*236+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*236+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*236+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*236+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*236+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*236+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*236+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(236+1)-1];
 
@@ -19369,7 +19843,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*236] 		+= temp_force*dx;
 			force[2*236+1]	+= temp_force*dy;
@@ -19383,21 +19859,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*237+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*237+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*237+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*237+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*237+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*237+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*237+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*237+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(237+1)-1];
 
@@ -19415,7 +19891,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*237] 		+= temp_force*dx;
 			force[2*237+1]	+= temp_force*dy;
@@ -19429,21 +19907,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*238+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*238+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*238+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*238+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*238+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*238+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*238+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*238+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(238+1)-1];
 
@@ -19461,7 +19939,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*238] 		+= temp_force*dx;
 			force[2*238+1]	+= temp_force*dy;
@@ -19475,21 +19955,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*239+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*239+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*239+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*239+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*239+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*239+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*239+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*239+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(239+1)-1];
 
@@ -19507,7 +19987,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*239] 		+= temp_force*dx;
 			force[2*239+1]	+= temp_force*dy;
@@ -19521,21 +20003,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*240+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*240+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*240+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*240+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*240+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*240+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*240+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*240+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(240+1)-1];
 
@@ -19553,7 +20035,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*240] 		+= temp_force*dx;
 			force[2*240+1]	+= temp_force*dy;
@@ -19567,21 +20051,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*241+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*241+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*241+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*241+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*241+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*241+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*241+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*241+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(241+1)-1];
 
@@ -19599,7 +20083,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*241] 		+= temp_force*dx;
 			force[2*241+1]	+= temp_force*dy;
@@ -19613,21 +20099,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*242+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*242+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*242+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*242+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*242+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*242+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*242+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*242+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(242+1)-1];
 
@@ -19645,7 +20131,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*242] 		+= temp_force*dx;
 			force[2*242+1]	+= temp_force*dy;
@@ -19659,21 +20147,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*243+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*243+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*243+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*243+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*243+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*243+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*243+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*243+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(243+1)-1];
 
@@ -19691,7 +20179,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*243] 		+= temp_force*dx;
 			force[2*243+1]	+= temp_force*dy;
@@ -19705,21 +20195,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*244+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*244+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*244+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*244+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*244+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*244+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*244+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*244+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(244+1)-1];
 
@@ -19737,7 +20227,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*244] 		+= temp_force*dx;
 			force[2*244+1]	+= temp_force*dy;
@@ -19751,21 +20243,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*245+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*245+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*245+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*245+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*245+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*245+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*245+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*245+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(245+1)-1];
 
@@ -19783,7 +20275,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*245] 		+= temp_force*dx;
 			force[2*245+1]	+= temp_force*dy;
@@ -19797,21 +20291,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*246+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*246+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*246+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*246+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*246+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*246+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*246+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*246+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(246+1)-1];
 
@@ -19829,7 +20323,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*246] 		+= temp_force*dx;
 			force[2*246+1]	+= temp_force*dy;
@@ -19843,21 +20339,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*247+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*247+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*247+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*247+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*247+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*247+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*247+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*247+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(247+1)-1];
 
@@ -19875,7 +20371,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*247] 		+= temp_force*dx;
 			force[2*247+1]	+= temp_force*dy;
@@ -19889,21 +20387,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*248+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*248+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*248+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*248+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*248+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*248+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*248+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*248+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(248+1)-1];
 
@@ -19921,7 +20419,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*248] 		+= temp_force*dx;
 			force[2*248+1]	+= temp_force*dy;
@@ -19935,21 +20435,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*249+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*249+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*249+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*249+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*249+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*249+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*249+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*249+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(249+1)-1];
 
@@ -19967,7 +20467,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*249] 		+= temp_force*dx;
 			force[2*249+1]	+= temp_force*dy;
@@ -19981,21 +20483,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*250+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*250+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*250+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*250+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*250+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*250+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*250+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*250+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(250+1)-1];
 
@@ -20013,7 +20515,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*250] 		+= temp_force*dx;
 			force[2*250+1]	+= temp_force*dy;
@@ -20027,21 +20531,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*251+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*251+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*251+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*251+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*251+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*251+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*251+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*251+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(251+1)-1];
 
@@ -20059,7 +20563,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*251] 		+= temp_force*dx;
 			force[2*251+1]	+= temp_force*dy;
@@ -20073,21 +20579,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*252+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*252+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*252+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*252+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*252+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*252+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*252+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*252+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(252+1)-1];
 
@@ -20105,7 +20611,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*252] 		+= temp_force*dx;
 			force[2*252+1]	+= temp_force*dy;
@@ -20119,21 +20627,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*253+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*253+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*253+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*253+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*253+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*253+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*253+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*253+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(253+1)-1];
 
@@ -20151,7 +20659,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*253] 		+= temp_force*dx;
 			force[2*253+1]	+= temp_force*dy;
@@ -20165,21 +20675,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*254+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*254+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*254+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*254+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*254+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*254+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*254+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*254+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(254+1)-1];
 
@@ -20197,7 +20707,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*254] 		+= temp_force*dx;
 			force[2*254+1]	+= temp_force*dy;
@@ -20211,21 +20723,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*255+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*255+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*255+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*255+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*255+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*255+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*255+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*255+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(255+1)-1];
 
@@ -20243,7 +20755,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*255] 		+= temp_force*dx;
 			force[2*255+1]	+= temp_force*dy;
@@ -20257,21 +20771,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*256+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*256+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*256+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*256+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*256+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*256+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*256+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*256+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(256+1)-1];
 
@@ -20289,7 +20803,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*256] 		+= temp_force*dx;
 			force[2*256+1]	+= temp_force*dy;
@@ -20303,21 +20819,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*257+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*257+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*257+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*257+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*257+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*257+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*257+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*257+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(257+1)-1];
 
@@ -20335,7 +20851,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*257] 		+= temp_force*dx;
 			force[2*257+1]	+= temp_force*dy;
@@ -20349,21 +20867,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*258+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*258+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*258+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*258+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*258+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*258+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*258+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*258+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(258+1)-1];
 
@@ -20381,7 +20899,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*258] 		+= temp_force*dx;
 			force[2*258+1]	+= temp_force*dy;
@@ -20395,21 +20915,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*259+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*259+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*259+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*259+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*259+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*259+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*259+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*259+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(259+1)-1];
 
@@ -20427,7 +20947,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*259] 		+= temp_force*dx;
 			force[2*259+1]	+= temp_force*dy;
@@ -20441,21 +20963,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*260+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*260+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*260+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*260+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*260+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*260+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*260+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*260+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(260+1)-1];
 
@@ -20473,7 +20995,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*260] 		+= temp_force*dx;
 			force[2*260+1]	+= temp_force*dy;
@@ -20487,21 +21011,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*261+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*261+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*261+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*261+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*261+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*261+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*261+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*261+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(261+1)-1];
 
@@ -20519,7 +21043,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*261] 		+= temp_force*dx;
 			force[2*261+1]	+= temp_force*dy;
@@ -20533,21 +21059,21 @@ static void *iteration_6 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*262+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*262+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*262+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*262+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*262+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*262+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*262+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*262+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(262+1)-1];
 
@@ -20565,7 +21091,9 @@ static void *iteration_6 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*262] 		+= temp_force*dx;
 			force[2*262+1]	+= temp_force*dy;
@@ -21929,6 +22457,8 @@ static void *iteration_7 (int *no) {
 	int iterate;
 	int j;
 
+	int cut;
+
 	double m_i_A = 1.0;
 	double m_i_B = m;
 
@@ -21943,9 +22473,7 @@ static void *iteration_7 (int *no) {
 	double dist_top;
 
 	// cutoff for the walls force, this will lead to a smoother transition
-	double dist_cutoff 			= 1.0;
 	double prefactor			= 3.0;
-	double force_wall_cutoff 	= 1.0*prefactor *(kappa/dist_cutoff + 1.0/(dist_cutoff*dist_cutoff))*exp(-kappa*dist_cutoff);
 
 	while(cont == 1) {
 		xi = position[2*263];
@@ -21956,21 +22484,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*263+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*263+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*263+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*263+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*263+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*263+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*263+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*263+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(263+1)-1];
 
@@ -21988,7 +22516,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*263] 		+= temp_force*dx;
 			force[2*263+1]	+= temp_force*dy;
@@ -22002,21 +22532,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*264+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*264+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*264+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*264+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*264+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*264+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*264+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*264+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(264+1)-1];
 
@@ -22034,7 +22564,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*264] 		+= temp_force*dx;
 			force[2*264+1]	+= temp_force*dy;
@@ -22048,21 +22580,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*265+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*265+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*265+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*265+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*265+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*265+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*265+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*265+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(265+1)-1];
 
@@ -22080,7 +22612,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*265] 		+= temp_force*dx;
 			force[2*265+1]	+= temp_force*dy;
@@ -22094,21 +22628,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*266+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*266+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*266+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*266+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*266+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*266+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*266+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*266+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(266+1)-1];
 
@@ -22126,7 +22660,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*266] 		+= temp_force*dx;
 			force[2*266+1]	+= temp_force*dy;
@@ -22140,21 +22676,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*267+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*267+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*267+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*267+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*267+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*267+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*267+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*267+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(267+1)-1];
 
@@ -22172,7 +22708,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*267] 		+= temp_force*dx;
 			force[2*267+1]	+= temp_force*dy;
@@ -22186,21 +22724,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*268+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*268+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*268+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*268+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*268+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*268+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*268+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*268+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(268+1)-1];
 
@@ -22218,7 +22756,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*268] 		+= temp_force*dx;
 			force[2*268+1]	+= temp_force*dy;
@@ -22232,21 +22772,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*269+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*269+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*269+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*269+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*269+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*269+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*269+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*269+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(269+1)-1];
 
@@ -22264,7 +22804,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*269] 		+= temp_force*dx;
 			force[2*269+1]	+= temp_force*dy;
@@ -22278,21 +22820,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*270+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*270+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*270+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*270+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*270+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*270+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*270+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*270+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(270+1)-1];
 
@@ -22310,7 +22852,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*270] 		+= temp_force*dx;
 			force[2*270+1]	+= temp_force*dy;
@@ -22324,21 +22868,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*271+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*271+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*271+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*271+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*271+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*271+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*271+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*271+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(271+1)-1];
 
@@ -22356,7 +22900,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*271] 		+= temp_force*dx;
 			force[2*271+1]	+= temp_force*dy;
@@ -22370,21 +22916,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*272+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*272+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*272+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*272+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*272+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*272+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*272+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*272+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(272+1)-1];
 
@@ -22402,7 +22948,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*272] 		+= temp_force*dx;
 			force[2*272+1]	+= temp_force*dy;
@@ -22416,21 +22964,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*273+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*273+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*273+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*273+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*273+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*273+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*273+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*273+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(273+1)-1];
 
@@ -22448,7 +22996,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*273] 		+= temp_force*dx;
 			force[2*273+1]	+= temp_force*dy;
@@ -22462,21 +23012,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*274+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*274+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*274+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*274+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*274+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*274+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*274+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*274+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(274+1)-1];
 
@@ -22494,7 +23044,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*274] 		+= temp_force*dx;
 			force[2*274+1]	+= temp_force*dy;
@@ -22508,21 +23060,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*275+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*275+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*275+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*275+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*275+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*275+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*275+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*275+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(275+1)-1];
 
@@ -22540,7 +23092,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*275] 		+= temp_force*dx;
 			force[2*275+1]	+= temp_force*dy;
@@ -22554,21 +23108,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*276+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*276+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*276+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*276+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*276+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*276+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*276+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*276+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(276+1)-1];
 
@@ -22586,7 +23140,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*276] 		+= temp_force*dx;
 			force[2*276+1]	+= temp_force*dy;
@@ -22600,21 +23156,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*277+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*277+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*277+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*277+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*277+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*277+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*277+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*277+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(277+1)-1];
 
@@ -22632,7 +23188,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*277] 		+= temp_force*dx;
 			force[2*277+1]	+= temp_force*dy;
@@ -22646,21 +23204,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*278+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*278+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*278+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*278+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*278+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*278+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*278+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*278+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(278+1)-1];
 
@@ -22678,7 +23236,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*278] 		+= temp_force*dx;
 			force[2*278+1]	+= temp_force*dy;
@@ -22692,21 +23252,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*279+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*279+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*279+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*279+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*279+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*279+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*279+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*279+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(279+1)-1];
 
@@ -22724,7 +23284,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*279] 		+= temp_force*dx;
 			force[2*279+1]	+= temp_force*dy;
@@ -22738,21 +23300,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*280+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*280+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*280+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*280+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*280+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*280+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*280+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*280+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(280+1)-1];
 
@@ -22770,7 +23332,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*280] 		+= temp_force*dx;
 			force[2*280+1]	+= temp_force*dy;
@@ -22784,21 +23348,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*281+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*281+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*281+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*281+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*281+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*281+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*281+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*281+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(281+1)-1];
 
@@ -22816,7 +23380,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*281] 		+= temp_force*dx;
 			force[2*281+1]	+= temp_force*dy;
@@ -22830,21 +23396,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*282+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*282+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*282+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*282+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*282+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*282+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*282+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*282+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(282+1)-1];
 
@@ -22862,7 +23428,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*282] 		+= temp_force*dx;
 			force[2*282+1]	+= temp_force*dy;
@@ -22876,21 +23444,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*283+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*283+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*283+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*283+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*283+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*283+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*283+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*283+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(283+1)-1];
 
@@ -22908,7 +23476,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*283] 		+= temp_force*dx;
 			force[2*283+1]	+= temp_force*dy;
@@ -22922,21 +23492,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*284+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*284+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*284+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*284+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*284+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*284+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*284+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*284+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(284+1)-1];
 
@@ -22954,7 +23524,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*284] 		+= temp_force*dx;
 			force[2*284+1]	+= temp_force*dy;
@@ -22968,21 +23540,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*285+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*285+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*285+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*285+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*285+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*285+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*285+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*285+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(285+1)-1];
 
@@ -23000,7 +23572,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*285] 		+= temp_force*dx;
 			force[2*285+1]	+= temp_force*dy;
@@ -23014,21 +23588,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*286+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*286+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*286+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*286+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*286+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*286+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*286+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*286+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(286+1)-1];
 
@@ -23046,7 +23620,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*286] 		+= temp_force*dx;
 			force[2*286+1]	+= temp_force*dy;
@@ -23060,21 +23636,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*287+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*287+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*287+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*287+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*287+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*287+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*287+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*287+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(287+1)-1];
 
@@ -23092,7 +23668,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*287] 		+= temp_force*dx;
 			force[2*287+1]	+= temp_force*dy;
@@ -23106,21 +23684,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*288+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*288+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*288+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*288+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*288+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*288+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*288+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*288+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(288+1)-1];
 
@@ -23138,7 +23716,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*288] 		+= temp_force*dx;
 			force[2*288+1]	+= temp_force*dy;
@@ -23152,21 +23732,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*289+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*289+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*289+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*289+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*289+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*289+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*289+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*289+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(289+1)-1];
 
@@ -23184,7 +23764,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*289] 		+= temp_force*dx;
 			force[2*289+1]	+= temp_force*dy;
@@ -23198,21 +23780,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*290+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*290+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*290+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*290+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*290+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*290+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*290+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*290+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(290+1)-1];
 
@@ -23230,7 +23812,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*290] 		+= temp_force*dx;
 			force[2*290+1]	+= temp_force*dy;
@@ -23244,21 +23828,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*291+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*291+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*291+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*291+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*291+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*291+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*291+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*291+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(291+1)-1];
 
@@ -23276,7 +23860,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*291] 		+= temp_force*dx;
 			force[2*291+1]	+= temp_force*dy;
@@ -23290,21 +23876,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*292+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*292+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*292+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*292+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*292+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*292+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*292+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*292+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(292+1)-1];
 
@@ -23322,7 +23908,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*292] 		+= temp_force*dx;
 			force[2*292+1]	+= temp_force*dy;
@@ -23336,21 +23924,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*293+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*293+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*293+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*293+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*293+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*293+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*293+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*293+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(293+1)-1];
 
@@ -23368,7 +23956,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*293] 		+= temp_force*dx;
 			force[2*293+1]	+= temp_force*dy;
@@ -23382,21 +23972,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*294+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*294+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*294+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*294+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*294+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*294+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*294+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*294+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(294+1)-1];
 
@@ -23414,7 +24004,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*294] 		+= temp_force*dx;
 			force[2*294+1]	+= temp_force*dy;
@@ -23428,21 +24020,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*295+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*295+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*295+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*295+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*295+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*295+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*295+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*295+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(295+1)-1];
 
@@ -23460,7 +24052,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*295] 		+= temp_force*dx;
 			force[2*295+1]	+= temp_force*dy;
@@ -23474,21 +24068,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*296+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*296+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*296+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*296+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*296+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*296+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*296+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*296+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(296+1)-1];
 
@@ -23506,7 +24100,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*296] 		+= temp_force*dx;
 			force[2*296+1]	+= temp_force*dy;
@@ -23520,21 +24116,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*297+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*297+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*297+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*297+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*297+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*297+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*297+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*297+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(297+1)-1];
 
@@ -23552,7 +24148,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*297] 		+= temp_force*dx;
 			force[2*297+1]	+= temp_force*dy;
@@ -23566,21 +24164,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*298+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*298+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*298+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*298+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*298+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*298+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*298+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*298+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(298+1)-1];
 
@@ -23598,7 +24196,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*298] 		+= temp_force*dx;
 			force[2*298+1]	+= temp_force*dy;
@@ -23612,21 +24212,21 @@ static void *iteration_7 (int *no) {
 
 		if (yi <= 1e-12) {
 			dist_bottom = 1e-12;
-			force[2*299+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*299+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
-		else if (yi <= dist_cutoff) {
+		else {
 			dist_bottom = yi;
-			force[2*299+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi) - force_wall_cutoff;
+			force[2*299+1] += 1.0*prefactor *(kappa/(dist_bottom) + 1.0/(dist_bottom*dist_bottom))*exp(-kappa*yi);
 		}
 
-			if (L_y - yi <= 1e-12) {
-				dist_top = 1e-12;
-				force[2*299+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
-			else if (L_y - yi <= dist_cutoff) {
-				dist_top = L_y-yi;
-				force[2*299+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top) - force_wall_cutoff;
-			}
+		if (L_y - yi <= 1e-12) {
+			dist_top = 1e-12;
+			force[2*299+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
+		else {
+			dist_top = L_y - yi;
+			force[2*299+1] -= 1.0*prefactor *(kappa/(dist_top) + 1.0/(dist_top*dist_top))*exp(-kappa*dist_top);
+		}
 
 		iterate = verlet[N*(299+1)-1];
 
@@ -23644,7 +24244,9 @@ static void *iteration_7 (int *no) {
 			dx 		-= dround(dx/L_x)*L_x;
 
 			r_squared = dx*dx + dy*dy;
-			temp_force = (m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff);
+			cut = (int)(r_squared/cutoff_squared);
+
+			temp_force = (1-cut)*((m_i_B*m_j/sqrt(r_squared))*(3*Gamma_A/(r_squared*r_squared)-force_cutoff));
 
 			force[2*299] 		+= temp_force*dx;
 			force[2*299+1]	+= temp_force*dy;
@@ -25028,11 +25630,6 @@ void simulation (void) {
 	// increase timestep counter
 	timesteps ++;
 
-	// initiate the threads own numbers
-	for (int i=0; i<thread_number; i++) {
-		numbers[i] = i;
-	}
-
 	// Initiate Threads and barrier, catch problems, number of threads is given in config-file
 	pthread_barrier_init(&barrier_main_one, NULL, thread_number+1);
 	pthread_barrier_init(&barrier_main_two, NULL, thread_number+1);
@@ -25111,7 +25708,7 @@ void simulation (void) {
 		}
 
 		// check if verlet list has to be updated
-		if ((verlet_max_1+verlet_max_2) > d_cutoff_verlet) {
+		if ((verlet_max_1+verlet_max_2) > (d_cutoff_verlet - cutoff)) {
 			update_verlet();
 			verlet_max_1 = 0;
 			verlet_max_2 = 0;

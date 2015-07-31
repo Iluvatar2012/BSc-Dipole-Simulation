@@ -49,7 +49,7 @@ int initiate (struct parameters* param) {
 
 	// calculate total number of A particles
 	frac_A		= round(N*X);
-	frac_X		= L_x/5.0;
+	frac_X		= L_x/4.0;
 
 	// initiate the SDL video mode, terminate if there was an error
 	if ((SDL_Init(SDL_INIT_VIDEO)) == -1) {
@@ -136,26 +136,22 @@ void draw_picture(int step, char* file) {
 			posX -= 2*frac_X;
 			posY += 4.5*L_y;
 
-		} else if (posX < 4*frac_X) {
+		} else {
 			posX -= 3*frac_X;
 			posY += 6.5*L_y;
-
-		} else {
-			posX -= 4*frac_X;
-			posY += 8.5*L_y;
 		}
 
 		// copy image to screen according to whether we need a A or B particle
 		if (i < frac_A) {
 			// compute x and y position of each dot
 			dst_even.x = round((posX/frac_X) *scrWidth - ball_A->w/2.);
-			dst_even.y = round((posY/(10.0*L_y))*scrHeight - ball_A->h/2.);
+			dst_even.y = round((posY/(8.0*L_y))*scrHeight - ball_A->h/2.);
 			SDL_BlitSurface(ball_A, NULL, screen, &dst_even);
 		}
 		else {
 			// compute x and y position of each dot
 			dst_uneven.x = round((posX/frac_X) *scrWidth - ball_B->w/2.);
-			dst_uneven.y = round((posY/(10.0*L_y))*scrHeight - ball_B->h/2.);
+			dst_uneven.y = round((posY/(8.0*L_y))*scrHeight - ball_B->h/2.);
 			SDL_BlitSurface(ball_B, NULL, screen, &dst_uneven);
 		}
 	}
