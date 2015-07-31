@@ -13,6 +13,9 @@ static int 		last_step;
 static double 	X;
 static double 	L_y;
 
+static double 	G;
+static double 	gamma;
+
 // variables for all arrays
 static double* positions;
 
@@ -30,6 +33,8 @@ static hid_t attr_N_id;
 static hid_t attr_X_id;
 static hid_t attr_L_y_id;
 static hid_t attr_last_id;
+static hid_t attr_G_id;
+static hid_t attr_gamma_id;
 
 // status variable
 static herr_t status;
@@ -64,6 +69,8 @@ struct parameters *hdf5_init (char* file) {
 	attr_X_id		= H5Aopen(position_set, "X_A", H5P_DEFAULT);
 	attr_L_y_id		= H5Aopen(position_set, "L_y", H5P_DEFAULT);
 	attr_last_id	= H5Aopen(position_set, "Last_Writeout", H5P_DEFAULT);
+	attr_G_id 		= H5Aopen(position_set, "Gamma_A", H5P_DEFAULT);
+	attr_gamma_id	= H5Aopen(position_set, "gamma", H5P_DEFAULT);
 
 	// read the attributes
 	status			= H5Aread(attr_N_id, H5T_NATIVE_INT, &N);
@@ -71,6 +78,8 @@ struct parameters *hdf5_init (char* file) {
 	status			= H5Aread(attr_X_id, H5T_NATIVE_DOUBLE, &X);
 	status			= H5Aread(attr_L_y_id, H5T_NATIVE_DOUBLE, &L_y);
 	status			= H5Aread(attr_last_id, H5T_NATIVE_INT, &last_step);
+	status			= H5Aread(attr_G_id, H5T_NATIVE_DOUBLE, &G);
+	status			= H5Aread(attr_gamma_id, H5T_NATIVE_DOUBLE, &gamma);
 
 	// close the attributes
 	status 			= H5Aclose(attr_N_id);
@@ -78,6 +87,8 @@ struct parameters *hdf5_init (char* file) {
 	status 			= H5Aclose(attr_X_id);
 	status 			= H5Aclose(attr_L_y_id);
 	status 			= H5Aclose(attr_last_id);
+	status 			= H5Aclose(attr_G_id);
+	status 			= H5Aclose(attr_gamma_id);
 
 	// set dimensions for remainder of data
 	pos_offset[0]	= 0;
@@ -101,6 +112,9 @@ struct parameters *hdf5_init (char* file) {
 
 	param->X 			= X;
 	param->L_y 			= L_y;
+
+	param->G 			= G;
+	param->gamma 		= gamma;
 
 	param->positions 	= positions;
 

@@ -90,8 +90,9 @@ int main(int argcount, char** argvec) {
 	// open filestream with overwrite attribute and output the simulations basic data
 	FILE *outfile = fopen(out_filename, "a+");
 
-	fprintf(outfile, "%lf,\t%lf,\t%lf,\t%lf,\t%lf,\t%lf,\t%lf,\t%lf\n", count_A_in, count_A_out, count_B_in, count_B_out, \
-																		count_A_in/N_A, count_A_out/N_A, count_B_in/(N-N_A), count_B_out/(N-N_A));
+	fprintf(outfile, "%lf,\t%lf,\t%lf,\t%lf,\t%lf,\t%lf,\t%lf,\t%lf,\t%lf,\t%lf,\t%lf\n", 	param->gamma, param->G, param->X, \
+																							count_A_in, count_A_out, count_B_in, count_B_out, \
+																							count_A_in/N_A, count_A_out/N_A, count_B_in/(N-N_A), count_B_out/(N-N_A));
 
 	// close the stream and delete the struct
 	fclose(outfile);

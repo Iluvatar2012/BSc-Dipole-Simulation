@@ -10,6 +10,9 @@ struct parameters {
 	double 	X;
 	double 	L_y;
 
+	double 	G;
+	double 	gamma;
+
 	double* positions;
 
 };
