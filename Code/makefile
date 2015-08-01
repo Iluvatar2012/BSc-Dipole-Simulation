@@ -1,5 +1,5 @@
 # set standard compiler to Intel C Compiler and set Compiler Flags, export variables
-CC		:= icc
+CC		:= gcc
 CFLAGS	:= -c -O3 -std=c99 -g
 export
 
@@ -31,6 +31,14 @@ all:
 	@echo ' '
 
 	$(MAKE) -C Histogram/ all
+
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	@echo ' '
+	@echo ' '
+
+	$(MAKE) -C Minimum/ all
 
 	@echo ' '
 	@echo ' '

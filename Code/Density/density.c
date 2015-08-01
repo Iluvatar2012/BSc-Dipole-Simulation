@@ -47,10 +47,14 @@ int main(int argcount, char** argvec) {
 	// calculate fraction of A particles and the cutoff sizes
 	N 		= param->N;
 	N_A 	= round(N * param->X);
-	
+
 	L_one = 0.25*param->L_y;
 	L_two = 0.75*param->L_y;
 
+	// There is no point in doing this analysis if we exclusively have A or B particles
+	if ((N_A == 0) || (N_A == N))
+		return EXIT_FAILURE;
+	
 	// copy the current positions
 	positions = param->positions;
 
