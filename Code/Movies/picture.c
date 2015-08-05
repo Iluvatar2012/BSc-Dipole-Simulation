@@ -68,14 +68,14 @@ int initiate (struct parameters* param) {
 	}
 
 	// get the picture of the black dot
-	ball_A = SDL_LoadBMP("Dots/Blue_Dot_9x9px.bmp");
+	ball_A = SDL_LoadBMP("Dots/Red_Dot_9x9px.bmp");
 	if (ball_A == NULL) {
 		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
 		return EXIT_FAILURE;
 	}
 
 	// get the picture of the red dot
-	ball_B = SDL_LoadBMP("Dots/Red_Dot_5x5px.bmp");
+	ball_B = SDL_LoadBMP("Dots/Blue_Dot_5x5px.bmp");
 	if (ball_B == NULL) {
 		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
 		return EXIT_FAILURE;

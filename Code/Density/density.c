@@ -59,7 +59,7 @@ int main(int argcount, char** argvec) {
 	positions = param->positions;
 
 	// iterate over the last half of the steps
-	for (int step=round(param->last_step/2.)+1; step<=param->last_step; step++) {
+	for (int step=round(param->last_step*1/3.)+1; step<=param->last_step; step++) {
 
 		// read the current step, increment step counter (done so nobody fucks up in determining the amount of steps read)
 		hdf5_read(step);
