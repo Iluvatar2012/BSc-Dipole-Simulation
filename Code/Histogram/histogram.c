@@ -100,7 +100,7 @@ int main(int argcount, char** argvec) {
 	for (int i=0; i<bins; i++) {
 		
 		// calculate the center of the bin, output the binning values to file
-		bincen = (0.5+i) * binsize;
+		bincen = (0.5+i) * binsize - 0.5*param->L_y;
 		fprintf(outfile, "%lf \t%lf \t%lf\n", bincen, count_A[i]*1./tot_count_A, count_B[i]*1./tot_count_B);
 	}
 

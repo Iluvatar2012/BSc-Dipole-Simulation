@@ -61,7 +61,7 @@ int initiate (struct parameters* param) {
 	atexit(SDL_Quit);
 
 	// set up the screen, this will be our frame, terminate if there was an error
-	screen = SDL_SetVideoMode(1200, 800, 16, SDL_HWSURFACE | SDL_DOUBLEBUF);
+	screen = SDL_SetVideoMode(2400, 1600, 16, SDL_HWSURFACE | SDL_DOUBLEBUF);
 	if (screen == NULL) {
 		fprintf(stderr, "Could not set video mode: %s\n", SDL_GetError());
 		return EXIT_FAILURE;
@@ -75,7 +75,7 @@ int initiate (struct parameters* param) {
 	}
 
 	// get the picture of the red dot
-	ball_B = SDL_LoadBMP("Dots/Blue_Dot_5x5px.bmp");
+	ball_B = SDL_LoadBMP("Dots/Blue_Dot_9x9px.bmp");
 	if (ball_B == NULL) {
 		fprintf(stderr, "Could not load image of dot: %s\n", SDL_GetError());
 		return EXIT_FAILURE;
